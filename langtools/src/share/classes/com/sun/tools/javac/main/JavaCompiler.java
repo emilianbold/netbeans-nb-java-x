@@ -261,7 +261,11 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
     /** The flow analyzer.
      */
     protected Flow flow;
-
+    
+    /** The error repairer.
+     */
+    public Repair repair;
+    
     /** The type eraser.
      */
     protected TransTypes transTypes;
@@ -294,6 +298,11 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
      */
     protected TaskListener taskListener;
 
+
+    protected FlowListener flowListener;
+    
+    protected LowMemoryWatch memoryWatch;
+
     /**
      * Annotation processing may require and provide a new instance
      * of the compiler to be used for the analyze and generate phases.
@@ -311,6 +320,8 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
     protected boolean implicitSourceFilesRead;
 
     protected Context context;
+
+    protected Map<JavaFileObject, JCCompilationUnit> notYetEntered;
 
     /** Construct a new compiler using a shared context.
      */
@@ -330,6 +341,8 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         writer = ClassWriter.instance(context);
         enter = Enter.instance(context);
         todo = Todo.instance(context);
+        flowListener = FlowListener.instance(context);
+        memoryWatch = LowMemoryWatch.instance(context);
 
         fileManager = context.get(JavaFileManager.class);
         parserFactory = ParserFactory.instance(context);
@@ -348,6 +361,7 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         chk = Check.instance(context);
         gen = Gen.instance(context);
         flow = Flow.instance(context);
+        repair = Repair.instance(context);
         transTypes = TransTypes.instance(context);
         lower = Lower.instance(context);
         annotate = Annotate.instance(context);
@@ -368,7 +382,7 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         lineDebugInfo = options.get("-g:")            == null ||
                         options.get("-g:lines")       != null;
         genEndPos     = options.get("-Xjcov")         != null ||
-                        context.get(DiagnosticListener.class) != null;
+                        (context.get(DiagnosticListener.class) != null && options.get("backgroundCompilation") == null);
         devVerbose    = options.get("dev") != null;
         processPcks   = options.get("process.packages") != null;
 
@@ -684,15 +698,19 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         if (completionFailureName == c.fullname) {
             throw new CompletionFailure(c, "user-selected completion failure by class name");
         }
-        JCCompilationUnit tree;
+        JCCompilationUnit tree = null;
         JavaFileObject filename = c.classfile;
         JavaFileObject prev = log.useSource(filename);
 
         try {
-            tree = parse(filename, filename.getCharContent(false));
+            if (notYetEntered != null)
+                tree = notYetEntered.remove(filename);
+            if (tree == null)
+                tree = parse(filename, filename.getCharContent(false));
         } catch (IOException e) {
             log.error("error.reading.file", filename, e);
             tree = make.TopLevel(List.<JCTree.JCAnnotation>nil(), null, List.<JCTree>nil());
+            tree.sourcefile = filename;
         } finally {
             log.useSource(prev);
         }
@@ -846,8 +864,10 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
 
         //parse all files
         ListBuffer<JCCompilationUnit> trees = lb();
-        for (JavaFileObject fileObject : fileObjects)
+        for (JavaFileObject fileObject : fileObjects) {
             trees.append(parse(fileObject));
+            memoryWatch.abortIfMemoryLow();
+        }
         return trees.toList();
     }
 
@@ -889,6 +909,10 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
             rootClasses = cdefs.toList();
         }
         return roots;
+    }
+
+    public void initNotYetEntered(Map<JavaFileObject, JCCompilationUnit> notYetEntered) {
+        this.notYetEntered = notYetEntered;
     }
 
     /**
@@ -1057,8 +1081,10 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
      */
     public Queue<Env<AttrContext>> attribute(Queue<Env<AttrContext>> envs) {
         ListBuffer<Env<AttrContext>> results = lb();
-        while (!envs.isEmpty())
+        while (!envs.isEmpty()) {
             results.append(attribute(envs.remove()));
+            memoryWatch.abortIfMemoryLow();
+        }
         return results;
     }
 
@@ -1105,8 +1131,9 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         ListBuffer<Env<AttrContext>> results = lb();
         for (Env<AttrContext> env: envs) {
             flow(env, results);
+            memoryWatch.abortIfMemoryLow();
         }
-        return stopIfError(results);
+        return results;
     }
 
     /**
@@ -1115,7 +1142,7 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
     public Queue<Env<AttrContext>> flow(Env<AttrContext> env) {
         ListBuffer<Env<AttrContext>> results = lb();
         flow(env, results);
-        return stopIfError(results);
+        return results;
     }
 
     /**
@@ -1123,9 +1150,6 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
      */
     protected void flow(Env<AttrContext> env, Queue<Env<AttrContext>> results) {
         try {
-            if (errorCount() > 0)
-                return;
-
             if (relax || compileStates.isDone(env, CompileState.FLOW)) {
                 results.add(env);
                 return;
@@ -1140,11 +1164,14 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
             try {
                 make.at(Position.FIRSTPOS);
                 TreeMaker localMake = make.forToplevel(env.toplevel);
+                if (flowListener != null) {
+                    flowListener.flowStarted (env);
+                }
                 flow.analyzeTree(env.tree, localMake);
+                if (flowListener != null) {
+                    flowListener.flowFinished (env);
+                }
                 compileStates.put(env, CompileState.FLOW);
-
-                if (errorCount() > 0)
-                    return;
 
                 results.add(env);
             }
@@ -1160,6 +1187,8 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
         }
     }
 
+    public boolean doRepair = true; // Allows for switching off repair. For test purposes only.
+
     /**
      * Prepare attributed parse trees, in conjunction with their attribution contexts,
      * for source or code generation.
@@ -1168,9 +1197,11 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
      */
     public Queue<Pair<Env<AttrContext>, JCClassDecl>> desugar(Queue<Env<AttrContext>> envs) {
         ListBuffer<Pair<Env<AttrContext>, JCClassDecl>> results = lb();
-        for (Env<AttrContext> env: envs)
+        for (Env<AttrContext> env: envs) {
             desugar(env, results);
-        return stopIfError(results);
+            memoryWatch.abortIfMemoryLow();
+        }
+        return results;
     }
 
     /**
@@ -1180,9 +1211,6 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
      * The preparation stops as soon as an error is found.
      */
     protected void desugar(final Env<AttrContext> env, Queue<Pair<Env<AttrContext>, JCClassDecl>> results) {
-        if (errorCount() > 0)
-            return;
-
         if (implicitSourcePolicy == ImplicitSourcePolicy.NONE
                 && !inputFiles.contains(env.toplevel.sourcefile)) {
             return;
@@ -1215,11 +1243,6 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
                 flow(attribute(dep));
         }
 
-        //We need to check for error another time as more classes might
-        //have been attributed and analyzed at this stage
-        if (errorCount() > 0)
-            return;
-
         if (verboseCompilePolicy)
             log.printLines(log.noticeWriter, "[desugar " + env.enclClass.sym + "]");
 
@@ -1244,6 +1267,9 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
                 return;
             }
 
+            if (doRepair)
+                env.tree = repair.translateTopLevelClass(env, env.tree, localMake);
+
             if (stubOutput) {
                 //emit stub Java source file, only for compilation
                 //units enumerated explicitly on the command line
@@ -1259,9 +1285,6 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
 
             env.tree = transTypes.translateTopLevelClass(env.tree, localMake);
 
-            if (errorCount() != 0)
-                return;
-
             if (sourceOutput) {
                 //emit standard Java source file, only for compilation
                 //units enumerated explicitly on the command line
@@ -1275,9 +1298,6 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
 
             //translate out inner classes
             List<JCTree> cdefs = lower.translateTopLevelClass(env, env.tree, localMake);
-
-            if (errorCount() != 0)
-                return;
 
             //generate code for each class
             for (List<JCTree> l = cdefs; l.nonEmpty(); l = l.tail) {
@@ -1341,6 +1361,8 @@ public class JavaCompiler implements ClassReader.SourceCompleter {
                 TaskEvent e = new TaskEvent(TaskEvent.Kind.GENERATE, env.toplevel, cdef.sym);
                 taskListener.finished(e);
             }
+            
+            memoryWatch.abortIfMemoryLow();
         }
     }
 
