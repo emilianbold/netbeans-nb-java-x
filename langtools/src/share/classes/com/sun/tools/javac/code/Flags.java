@@ -235,6 +235,9 @@ public class Flags {
      */
     public static final long DISJOINT = 1L<<39;
 
+    public static final long FROMCLASS = 1L<<40;
+    public static final long APT_CLEANED = 1L<<41;
+
     /** Modifier masks.
      */
     public static final int
