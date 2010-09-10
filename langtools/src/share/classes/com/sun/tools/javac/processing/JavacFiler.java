@@ -25,6 +25,7 @@
 
 package com.sun.tools.javac.processing;
 
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.util.*;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
@@ -34,6 +35,7 @@ import javax.lang.model.element.Element;
 import java.util.*;
 
 import java.io.Closeable;
+import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.FilterOutputStream;
@@ -42,6 +44,7 @@ import java.io.Writer;
 import java.io.FilterWriter;
 import java.io.PrintWriter;
 import java.io.IOException;
+import javax.lang.model.element.ElementKind;
 
 import javax.tools.*;
 import static java.util.Collections.*;
@@ -370,23 +373,43 @@ public class JavacFiler implements Filer, Closeable {
 
     public JavaFileObject createSourceFile(CharSequence name,
                                            Element... originatingElements) throws IOException {
-        return createSourceOrClassFile(true, name.toString());
+        return createSourceOrClassFile(true, name.toString(), originatingElements);
     }
 
     public JavaFileObject createClassFile(CharSequence name,
                                            Element... originatingElements) throws IOException {
-        return createSourceOrClassFile(false, name.toString());
+        return createSourceOrClassFile(false, name.toString(), originatingElements);
     }
 
-    private JavaFileObject createSourceOrClassFile(boolean isSourceFile, String name) throws IOException {
+    private JavaFileObject createSourceOrClassFile(boolean isSourceFile, String name, final Element[] originatingElements) throws IOException {
+        if (lint) {
+            int periodIndex = name.lastIndexOf(".");
+            if (periodIndex != -1) {
+                String base = name.substring(periodIndex);
+                String extn = (isSourceFile ? ".java" : ".class");
+                if (base.equals(extn))
+                    log.warning("proc.suspicious.class.name", name, extn);
+            }
+        }
         checkNameAndExistence(name, isSourceFile);
         Location loc = (isSourceFile ? SOURCE_OUTPUT : CLASS_OUTPUT);
         JavaFileObject.Kind kind = (isSourceFile ?
                                     JavaFileObject.Kind.SOURCE :
                                     JavaFileObject.Kind.CLASS);
 
-        JavaFileObject fileObject =
-            fileManager.getJavaFileForOutput(loc, name, kind, null);
+        JavaFileObject fileObject;
+        final Collection<String> urls = getElementURLs(originatingElements);
+        final boolean hasElements = !urls.isEmpty();
+        if (hasElements) {
+            fileManager.handleOption("apt-source-element", urls.iterator());
+        }
+        try {
+            fileObject = fileManager.getJavaFileForOutput(loc, name, kind, null);
+        } finally {
+            if (hasElements) {
+                fileManager.handleOption("apt-source-element", Collections.<String>emptySet().iterator());
+            }
+        }
         checkFileReopening(fileObject, true);
 
         if (lastRound)
@@ -411,9 +434,19 @@ public class JavacFiler implements Filer, Closeable {
         if (strPkg.length() > 0)
             checkName(strPkg);
 
-        FileObject fileObject =
-            fileManager.getFileForOutput(location, strPkg,
-                                         relativeName.toString(), null);
+        FileObject fileObject;
+        final Collection<String> urls = getElementURLs(originatingElements);
+        final boolean hasElements = !urls.isEmpty();
+        if (hasElements) {
+            fileManager.handleOption("apt-resource-element", urls.iterator());
+        }
+        try {
+            fileObject = fileManager.getFileForOutput(location, strPkg, relativeName.toString(), null);
+        } finally {
+            if (hasElements) {
+                fileManager.handleOption("apt-resource-element", Collections.<String>emptySet().iterator());
+            }
+        }
         checkFileReopening(fileObject, true);
 
         if (fileObject instanceof JavaFileObject)
@@ -430,6 +463,29 @@ public class JavacFiler implements Filer, Closeable {
                                                    stdLoc);
         }
     }
+    
+    private static Collection<String> getElementURLs(final Element[] originatingElements) {
+        if (originatingElements == null) {
+            return Collections.<String>emptySet();
+        }
+        final Set<String> result = new HashSet<String>(originatingElements.length);
+        for (final Element oe : originatingElements) {
+            final ClassSymbol te  = findTopLevel(oe);
+            if (te != null) {
+                result.add(te.classfile.toUri().toString());
+            }
+        }
+        return result;
+    }
+    
+    private static ClassSymbol findTopLevel (Element e) {
+        Element prev = null;
+        while (e != null && e.getKind() != ElementKind.PACKAGE) {
+            prev = e;
+            e = e.getEnclosingElement();
+        }
+        return e == null ? null : (ClassSymbol) prev;
+    }
 
     public FileObject getResource(JavaFileManager.Location location,
                                   CharSequence pkg,
@@ -441,10 +497,15 @@ public class JavacFiler implements Filer, Closeable {
         // TODO: Only support reading resources in selected output
         // locations?  Only allow reading of non-source, non-class
         // files from the supported input locations?
-        FileObject fileObject = fileManager.getFileForOutput(location,
-                                                             pkg.toString(),
-                                                             relativeName.toString(),
-                                                             null);
+        FileObject fileObject = fileManager.getFileForInput(location,
+                    pkg.toString(),
+                    relativeName.toString());
+        if (fileObject == null) {
+            String name = (pkg.length() == 0)
+                    ? relativeName.toString() : (pkg + "/" + relativeName);
+            throw new FileNotFoundException(name);
+        }
+
         // If the path was already opened for writing, throw an exception.
         checkFileReopening(fileObject, false);
         return new FilerInputFileObject(fileObject);
@@ -530,11 +591,14 @@ public class JavacFiler implements Filer, Closeable {
     /**
      * Update internal state for a new round.
      */
-    public void newRound(Context context, boolean lastRound) {
+    public void newRound(Context context) {
         this.context = context;
         this.log = Log.instance(context);
-        this.lastRound = lastRound;
         clearRoundState();
+    }
+
+    void setLastRound(boolean lastRound) {
+        this.lastRound = lastRound;
     }
 
     public void close() {

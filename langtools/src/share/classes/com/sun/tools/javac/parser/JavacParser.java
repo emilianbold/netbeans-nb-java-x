@@ -2264,7 +2264,7 @@ public class JavacParser implements Parser {
         int lastPos = Position.NOPOS;
     loop:
         while (true) {
-            long flag;
+            long flag = 0;
             switch (S.token()) {
             case PRIVATE     : flag = Flags.PRIVATE; break;
             case PROTECTED   : flag = Flags.PROTECTED; break;
@@ -2278,6 +2278,7 @@ public class JavacParser implements Parser {
             case SYNCHRONIZED: flag = Flags.SYNCHRONIZED; break;
             case STRICTFP    : flag = Flags.STRICTFP; break;
             case MONKEYS_AT  : flag = Flags.ANNOTATION; break;
+            case ERROR       : S.nextToken(); break;
             default: break loop;
             }
             if ((flags & flag) != 0) log.error(S.pos(), "repeated.modifier");
@@ -2297,12 +2298,6 @@ public class JavacParser implements Parser {
             }
             flags |= flag;
         }
-
-        /* A modifiers tree with no modifier tokens or annotations
-         * has no text position. */
-        if ((flags & (Flags.ModifierFlags | Flags.ANNOTATION)) == 0 && annotations.isEmpty())
-            pos = Position.NOPOS;
-
         switch (S.token()) {
         case ENUM:
             if (this.allowEnums) {
@@ -2312,6 +2307,11 @@ public class JavacParser implements Parser {
         case INTERFACE: flags |= Flags.INTERFACE; break;
         default: break;
         }
+
+        /* A modifiers tree with no modifier tokens or annotations
+         * has no text position. */
+        if ((flags & (Flags.ModifierFlags | Flags.ANNOTATION)) == 0 && annotations.isEmpty())
+            pos = Position.NOPOS;
 
         JCModifiers mods = F.at(pos).Modifiers(flags, annotations.toList());
         if (pos != Position.NOPOS)
@@ -2972,10 +2972,8 @@ public class JavacParser implements Parser {
      */
     public List<JCTree> classOrInterfaceBodyDeclaration(Name className, boolean isInterface) {
         if (S.token() == SEMI) {
-            JCTree block = F.at(S.pos()).Block(0, List.<JCStatement>nil());
-            storeEnd(block, S.endPos());
             S.nextToken();
-            return List.<JCTree>of(block);
+            return List.<JCTree>nil();
         } else {
             String dc = S.docComment();
             int pos = S.pos();

@@ -128,6 +128,7 @@ public class Lint
         this.suppressedValues = other.suppressedValues.clone();
     }
 
+    @Override
     public String toString() {
         return "Lint:[values" + values + " suppressedValues" + suppressedValues + "]";
     }
