@@ -551,7 +551,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                 invalid = true;
                 throw e;
             } catch (Throwable t) {
-                if (t instanceof ThreadDeath) throw (ThreadDeath) t;
+                rethrowAbort(t);
                 LOGGER.log(Level.INFO, "Annotation processing error:", t);
                 invalid = true;
             }
@@ -837,8 +837,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         } catch (ClientCodeException e) {
             throw e;
         } catch (Throwable t) {
-            if (t instanceof ThreadDeath)
-                throw (ThreadDeath)t;
+            rethrowAbort(t);
             LOGGER.log(Level.INFO, "Annotation processing error:", t);
             return false;
         } finally {
@@ -1182,10 +1181,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         try {
             compiler.enterTrees(roots);
         } catch (Throwable t) {
-            if (t instanceof ThreadDeath)
-                throw (ThreadDeath)t;
-            if (t instanceof Abort)
-                throw (Abort)t;
+            rethrowAbort(t);
             LOGGER.log(Level.INFO, "Error while re-entering:", t);
             throw new Abort(t);
         }            
@@ -1556,5 +1552,11 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                 return false;
         }
         return true;
+    }
+
+    private static void rethrowAbort(final Throwable t) throws Error {
+        if (t instanceof ThreadDeath || t instanceof Abort) {
+            throw (Error) t;
+        }
     }
 }
