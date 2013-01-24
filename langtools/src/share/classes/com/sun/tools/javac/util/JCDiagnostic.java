@@ -341,7 +341,7 @@ public class JCDiagnostic implements Diagnostic<JavaFileObject> {
         }
 
         private final int pos;
-    }
+        }
 
     public enum DiagnosticFlag {
         MANDATORY,
@@ -483,6 +483,10 @@ public class JCDiagnostic implements Diagnostic<JavaFileObject> {
     public long getEndPosition() {
         return getIntEndPosition();
     }
+    
+    public JCTree getTree() {
+        return position == null ? null : position.getTree();
+    }
 
     /**
      * Get the line number within the source referred to by this diagnostic.
@@ -580,6 +584,10 @@ public class JCDiagnostic implements Diagnostic<JavaFileObject> {
         return flags.contains(flag);
     }
 
+    public boolean hasFixedPositions () {
+        return this.position.getTree() == null;
+    }
+    
     public static class MultilineDiagnostic extends JCDiagnostic {
 
         private final List<JCDiagnostic> subdiagnostics;
