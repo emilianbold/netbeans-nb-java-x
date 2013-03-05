@@ -273,6 +273,9 @@ public class Flags {
      */
     public static final long NOT_IN_PROFILE = 1L<<45;
 
+    public static final long FROMCLASS = 1L<<61;
+    public static final long APT_CLEANED = 1L<<62;
+
     /** Modifier masks.
      */
     public static final int
