@@ -85,6 +85,29 @@ public class DocCommentParserTest extends TestCase {
                            );
     }
     
+    public void test229748() throws IOException {
+        doTestErrorRecovery("{@literal http://wikis.sun.com/display/mlvm/ProjectCoinProposal\n" +
+                            "@see String\n",
+                            "DOC_COMMENT:{@literal http://wikis.sun.com/display/mlvm/ProjectCoinProposal\n" +
+                            "@see String",
+                            "LITERAL:{@literal http://wikis.sun.com/display/mlvm/ProjectCoinProposal\n",
+                            "TEXT:http://wikis.sun.com/display/mlvm/ProjectCoinProposal\n",
+                            "SEE:@see String",
+                            "REFERENCE:String");
+    }
+    
+    public void test229725() throws IOException {
+        doTestErrorRecovery("{@link http://wikis.sun.com/display/mlvm/ProjectCoinProposal}\n" +
+                            "@see http://wikis.sun.com/display/mlvm/ProjectCoinProposal\n",
+                            "DOC_COMMENT:{@link http://wikis.sun.com/display/mlvm/ProjectCoinProposal}\n" +
+                            "@see http://wikis.sun.com/display/mlvm/ProjectCoinProposal",
+                            "LINK:{@link http://wikis.sun.com/display/mlvm/ProjectCoinProposal}",
+                            "REFERENCE:http://wikis.sun.com/display/mlvm/ProjectCoinProposal",
+                            "SEE:@see http://wikis.sun.com/display/mlvm/ProjectCoinProposal",
+                            "REFERENCE:http://wikis.sun.com/display/mlvm/ProjectCoinProposal"
+                           );
+    }
+    
     private void doTestErrorRecovery(String javadocCode, String... golden) throws IOException {
         final String bootPath = System.getProperty("sun.boot.class.path"); //NOI18N
         final JavaCompiler tool = ToolProvider.getSystemJavaCompiler();
