@@ -125,10 +125,11 @@ public class Pretty extends JCTree.Visitor {
         if (ownPrec < contextPrec) out.write(")");
     }
 
-    /** Print string, replacing all non-ascii character with unicode escapes.
+    /** Print string, possibly replacing all non-ascii character with unicode escapes.
      */
     public void print(Object s) throws IOException {
-        out.write(Convert.escapeUnicode(s.toString()));
+        String text = s.toString();
+        out.write(sourceOutput ? Convert.escapeUnicode(text) : text);
     }
 
     /** Print new line.
@@ -973,7 +974,6 @@ public class Pretty extends JCTree.Visitor {
                     printBrackets((JCArrayTypeTree) elem);
             }
             if (tree.elems != null) {
-                if (tree.elemtype != null) print("[]");
                 print("{");
                 printExprs(tree.elems);
                 print("}");
