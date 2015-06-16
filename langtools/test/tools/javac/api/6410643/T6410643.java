@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
  * @run main T6410643
  */
 
+import java.io.IOException;
 import javax.tools.JavaFileObject;
 import static java.util.Collections.singleton;
 
@@ -40,7 +41,7 @@ public class T6410643 extends ToolTester {
                      Iterable<String> classes,
                      Iterable<? extends JavaFileObject> compilationUnits) {
         try {
-            task = tool.getTask(null, null, null, null, null, singleton((JavaFileObject)null));
+            task = tool.getTask(null, null, null, options, classes, compilationUnits);
             throw new AssertionError("Error expected");
         } catch (NullPointerException e) {
             System.err.println("Expected error occurred: " + e);
@@ -49,9 +50,13 @@ public class T6410643 extends ToolTester {
 
     void test(String... args) {
         task = tool.getTask(null, null, null, null, null, null);
-        if (task.call())
+        try {
+            task.call();
             throw new AssertionError("Error expected");
-        System.err.println("Compilation failed as expected!");
+        } catch (IllegalStateException e) {
+            System.err.println("Expected error occurred: " + e);
+        }
+
         Iterable<String>         s = singleton(null);
         Iterable<JavaFileObject> f = singleton(null);
         //    case (null, null, null) is tested above
@@ -64,7 +69,10 @@ public class T6410643 extends ToolTester {
         testGetTask(s,    s,    f);
         System.err.println("Test result: PASSED");
     }
-    public static void main(String... args) {
-        new T6410643().test(args);
+
+    public static void main(String... args) throws IOException {
+        try (T6410643 t = new T6410643()) {
+            t.test(args);
+        }
     }
 }

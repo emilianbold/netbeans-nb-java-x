@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -76,7 +76,7 @@ public class T6306137 {
     }
     void test(String encoding, boolean good) {
         error = false;
-        Iterable<String> args = Arrays.asList("-source", "6", "-encoding", encoding, "-d", ".");
+        Iterable<String> args = Arrays.asList("-encoding", encoding, "-d", ".");
         compiler.getTask(null, fm, dl, args, null, files).call();
         if (error == good) {
             if (error) {
@@ -87,10 +87,18 @@ public class T6306137 {
         }
     }
 
+    void close() throws IOException {
+        fm.close();
+    }
+
     public static void main(String[] args) throws IOException {
         T6306137 self = new T6306137();
-        self.test("utf-8", true);
-        self.test("ascii", false);
-        self.test("utf-8", true);
+        try {
+            self.test("utf-8", true);
+            self.test("ascii", false);
+            self.test("utf-8", true);
+        } finally {
+            self.close();
+        }
     }
 }

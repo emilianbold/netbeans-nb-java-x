@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,13 +29,15 @@
 
 import java.io.*;
 import java.util.*;
+
 import javax.annotation.processing.*;
 import javax.lang.model.element.*;
 import javax.tools.*;
-import com.sun.tools.javac.file.*;
-import com.sun.tools.javac.file.JavacFileManager; // disambiguate
+
+import com.sun.tools.javac.api.JavacTaskImpl;
+import com.sun.tools.javac.api.JavacTool;
+import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.main.JavaCompiler;
-import com.sun.tools.javac.main.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List; // disambiguate
 
@@ -57,17 +59,12 @@ public class T6358166 extends AbstractProcessor {
 
     static void test(JavacFileManager fm, JavaFileObject f, String... args) throws Throwable {
         Context context = new Context();
-        fm.setContext(context);
 
-        Main compilerMain = new Main("javac", new PrintWriter(System.err, true));
-        compilerMain.setOptions(Options.instance(context));
-        compilerMain.filenames = new LinkedHashSet<File>();
-        compilerMain.processArgs(args);
+        JavacTool tool = JavacTool.create();
+        JavacTaskImpl task = (JavacTaskImpl) tool.getTask(null, fm, null, Arrays.asList(args), null, List.of(f), context);
+        task.call();
 
         JavaCompiler c = JavaCompiler.instance(context);
-
-        c.compile(List.of(f));
-
         if (c.errorCount() != 0)
             throw new AssertionError("compilation failed");
 

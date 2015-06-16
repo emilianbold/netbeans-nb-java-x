@@ -41,27 +41,6 @@ import java.util.*;
 import java.util.regex.*;
 
 public class DotFileTest {
-    private static boolean symbolFileExist = initProfiles();
-    private static boolean initProfiles() {
-        // check if ct.sym exists; if not use the profiles.properties file
-        Path home = Paths.get(System.getProperty("java.home"));
-        if (home.endsWith("jre")) {
-            home = home.getParent();
-        }
-        Path ctsym = home.resolve("lib").resolve("ct.sym");
-        boolean symbolExists = ctsym.toFile().exists();
-        if (!symbolExists) {
-            Path testSrcProfiles =
-                Paths.get(System.getProperty("test.src", "."), "profiles.properties");
-            if (!testSrcProfiles.toFile().exists())
-                throw new Error(testSrcProfiles + " does not exist");
-            System.out.format("%s doesn't exist.%nUse %s to initialize profiles info%n",
-                ctsym, testSrcProfiles);
-            System.setProperty("jdeps.profiles", testSrcProfiles.toString());
-        }
-        return symbolExists;
-    }
-
     public static void main(String... args) throws Exception {
         int errors = 0;
         errors += new DotFileTest().run();
@@ -124,7 +103,7 @@ public class DotFileTest {
              new String[] {"-v", "-classpath", testDir.getPath()});
 
         testSummary(new File(testDir, "Test.class"),
-             new String[] {"rt.jar", testDir.getName()},
+             new String[] {"java.base", testDir.getName()},
              new String[] {"compact1", ""},
              new String[] {"-classpath", testDir.getPath()});
         testSummary(new File(testDir, "Test.class"),
