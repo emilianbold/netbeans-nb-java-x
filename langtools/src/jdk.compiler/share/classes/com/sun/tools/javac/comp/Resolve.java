@@ -97,6 +97,7 @@ public class Resolve {
     private final boolean debugResolve;
     private final boolean compactMethodDiags;
     final EnumSet<VerboseResolutionMode> verboseResolutionMode;
+    private final boolean ideMode;
 
     WriteableScope polymorphicSignatureScope;
 
@@ -132,6 +133,7 @@ public class Resolve {
         polymorphicSignatureScope = WriteableScope.create(syms.noSymbol);
 
         inapplicableMethodException = new InapplicableMethodException(diags);
+        this.ideMode = options.get("ide") != null;
     }
 
     /** error symbols, which are returned when resolution fails
@@ -265,7 +267,7 @@ public class Resolve {
     /** An environment is "static" if its static level is greater than
      *  the one of its outer environment
      */
-    protected static boolean isStatic(Env<AttrContext> env) {
+    public static boolean isStatic(Env<AttrContext> env) {
         return env.outer != null && env.info.staticLevel > env.outer.info.staticLevel;
     }
 
@@ -298,6 +300,8 @@ public class Resolve {
             return true;
 
         boolean isAccessible = false;
+        if (c == null)
+            return isAccessible;
         switch ((short)(c.flags() & AccessFlags)) {
             case PRIVATE:
                 isAccessible =
@@ -323,7 +327,7 @@ public class Resolve {
                     isInnerSubClass(env.enclClass.sym, c.owner);
                 break;
         }
-        return (checkInner == false || c.type.getEnclosingType() == Type.noType) ?
+        return (checkInner == false || c.type.isErroneous() || c.type.getEnclosingType() == Type.noType) ?
             isAccessible :
             isAccessible && isAccessible(env, c.type.getEnclosingType(), checkInner);
     }
@@ -734,7 +738,7 @@ public class Resolve {
                 reportMC(env.tree, MethodCheckDiag.ARITY_MISMATCH, inferenceContext); // not enough args
             }
 
-            while (argtypes.nonEmpty() && formals.head != varargsFormal) {
+            while (argtypes.nonEmpty() && formals.nonEmpty() && formals.head != varargsFormal) {
                 DiagnosticPosition pos = trees != null ? trees.head : null;
                 checkArg(pos, false, argtypes.head, formals.head, deferredAttrContext, warn);
                 argtypes = argtypes.tail;
@@ -1908,9 +1912,16 @@ public class Resolve {
     Symbol loadClass(Env<AttrContext> env, Name name) {
         try {
             ClassSymbol c = finder.loadClass(name);
+            if (c.type.isErroneous())
+                return typeNotFound;
             return isAccessible(env, c) ? c : new AccessError(c);
         } catch (ClassFinder.BadClassFile err) {
-            throw err;
+            if (ideMode) {
+                return typeNotFound;
+            }
+            else {
+                throw err;
+            }
         } catch (CompletionFailure ex) {
             return typeNotFound;
         }
@@ -2006,7 +2017,7 @@ public class Resolve {
     Symbol findGlobalType(Env<AttrContext> env, Scope scope, Name name) {
         Symbol bestSoFar = typeNotFound;
         for (Symbol s : scope.getSymbolsByName(name)) {
-            Symbol sym = loadClass(env, s.flatName());
+            Symbol sym = s.type.isErroneous() ? s : loadClass(env, s.flatName());
             if (bestSoFar.kind == TYP && sym.kind == TYP &&
                 bestSoFar != sym)
                 return new AmbiguityError(bestSoFar, sym);
@@ -3271,6 +3282,19 @@ public class Resolve {
                        Env<AttrContext> env,
                        TypeSymbol c,
                        Name name) {
+        // Check that declarations in inner classes are not static. If so,
+        // 'Inner classes cannot have static declarations is already reported
+        // and there is no need to report 'Non-static {0} {1} cannot be referenced from a static context'.
+        boolean staticInnerDecl = false;
+        if (env.tree.hasTag(VARDEF) && (TreeInfo.flags(env.tree) & (STATIC | INTERFACE)) != 0) {
+            Symbol sym = ((JCVariableDecl)env.tree).sym;
+            if (sym == null || sym.kind != VAR || ((VarSymbol) sym).getConstValue() == null) {
+                sym = env.enclClass.sym;
+                if (sym != null && sym.owner.kind != PCK && ((sym.flags() & STATIC) == 0 || sym.name == names.empty)) {
+                    staticInnerDecl = true;
+                }
+            }
+        }
         Env<AttrContext> env1 = env;
         boolean staticOnly = false;
         while (env1.outer != null) {
@@ -3278,7 +3302,7 @@ public class Resolve {
             if (env1.enclClass.sym == c) {
                 Symbol sym = env1.info.scope.findFirst(name);
                 if (sym != null) {
-                    if (staticOnly) sym = new StaticError(sym);
+                    if (staticOnly && !staticInnerDecl) sym = new StaticError(sym);
                     return accessBase(sym, pos, env.enclClass.sym.type,
                                   name, true);
                 }
@@ -3290,15 +3314,15 @@ public class Resolve {
             name == names._super && !isStatic(env) &&
             types.isDirectSuperInterface(c, env.enclClass.sym)) {
             //this might be a default super call if one of the superinterfaces is 'c'
-            for (Type t : pruneInterfaces(env.enclClass.type)) {
+            for (Type t : pruneInterfaces(env.enclClass.sym.type)) {
                 if (t.tsym == c) {
                     env.info.defaultSuperCallSite = t;
                     return new VarSymbol(0, names._super,
-                            types.asSuper(env.enclClass.type, c), env.enclClass.sym);
+                            types.asSuper(env.enclClass.sym.type, c), env.enclClass.sym);
                 }
             }
             //find a direct superinterface that is a subtype of 'c'
-            for (Type i : types.interfaces(env.enclClass.type)) {
+            for (Type i : types.interfaces(env.enclClass.sym.type)) {
                 if (i.tsym.isSubClass(c, types) && i.tsym != c) {
                     log.error(pos, "illegal.default.super.call", c,
                             diags.fragment("redundant.supertype", c, i));
@@ -3690,7 +3714,20 @@ public class Resolve {
 
         @Override
         public Symbol access(Name name, TypeSymbol location) {
-            return types.createErrorType(name, location, syms.errSymbol.type).tsym;
+            Candidate c = bestCandidate();
+            return types.createErrorType(name, location, c != null ? c.sym.type : syms.errSymbol.type).tsym;
+        }
+        
+        private Candidate bestCandidate() {
+            Candidate bestSoFar = null;
+            for (Candidate c : resolveContext.candidates) {
+                if (bestSoFar != null && bestSoFar.sym != c.sym) {
+                    bestSoFar = null;
+                    break;
+                }
+                bestSoFar = c;
+            }
+            return bestSoFar;
         }
 
         protected Pair<Symbol, JCDiagnostic> errCandidate() {
@@ -4155,6 +4192,9 @@ public class Resolve {
              */
             boolean matches(Object o) {
                 JCDiagnostic d = (JCDiagnostic)o;
+                if (d == null) {
+                    return false;
+                }
                 Object[] args = d.getArgs();
                 if (!d.getCode().matches(regex) ||
                         subTemplates.length != d.getArgs().length) {

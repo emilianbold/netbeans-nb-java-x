@@ -351,6 +351,9 @@ public class Symtab {
             public <R, P> R accept(ElementVisitor<R, P> v, P p) {
                 return v.visitUnknown(this, p);
             }
+            public boolean hasOuterInstance() {
+                return false;
+            }
         };
 
         // create the error symbols
@@ -546,6 +549,23 @@ public class Symtab {
         return c;
     }
 
+    public ClassSymbol enterClass(Name flatname, Name name, Symbol owner) {
+        ClassSymbol c = classes.get(flatname);
+        if (c == null) {
+            c = defineClass(name, owner);
+            c.flatname = flatname;
+            classes.put(flatname, c);
+        } else if ((c.name != name || c.owner != owner) && c.owner.kind.matches(Kinds.KindSelector.TYP_PCK)) {
+            // reassign fields of classes that might have been loaded with
+            // their flat names.
+            c.owner.members().remove(c);
+            c.name = name;
+            c.owner = owner;
+            c.fullname = ClassSymbol.formFullName(name, owner);
+        }
+        return c;
+    }
+
     /**
      * Creates a new toplevel class symbol with given flat name and
      * given class (or source) file.
@@ -580,6 +600,8 @@ public class Symtab {
      *  and enter in `classes' unless already there.
      */
     public ClassSymbol enterClass(Name flatname) {
+        if (flatname == null)
+            flatname = names.empty;
         ClassSymbol c = classes.get(flatname);
         if (c == null)
             return enterClass(flatname, (JavaFileObject)null);

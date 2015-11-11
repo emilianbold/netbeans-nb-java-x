@@ -69,6 +69,7 @@ public class JavacElements implements Elements {
     private final Names names;
     private final Types types;
     private final Enter enter;
+    private final LazyTreeLoader loader;
 
     public static JavacElements instance(Context context) {
         JavacElements instance = context.get(JavacElements.class);
@@ -84,6 +85,7 @@ public class JavacElements implements Elements {
         names = Names.instance(context);
         types = Types.instance(context);
         enter = Enter.instance(context);
+        loader = LazyTreeLoader.instance(context);
     }
 
     @DefinedBy(Api.LANGUAGE_MODEL)
@@ -102,6 +104,40 @@ public class JavacElements implements Elements {
         return SourceVersion.isName(strName)
             ? nameToSymbol(strName, ClassSymbol.class)
             : null;
+    }
+
+
+    public ClassSymbol getTypeElementByBinaryName (final CharSequence binaryName) {
+        final String strName = binaryName instanceof String ? (String) binaryName : binaryName.toString();
+        int index = strName.indexOf('$');   //NOI18N
+        final String owner = index < 0 ? strName : strName.substring(0,index);
+        return SourceVersion.isName(owner)
+            ? binaryNameToClassSymbol(strName, owner)
+            : null;
+    }
+
+    private ClassSymbol binaryNameToClassSymbol (final String binaryName, final String owner) {
+        final Name name = names.fromString(binaryName);
+        ClassSymbol sym = syms.classes.get(name);
+        try {
+            if (sym == null) {
+                javaCompiler.resolveIdent(owner);
+                sym = syms.classes.get(name);
+            }
+
+            if (sym != null) {
+                sym.complete();
+                return (sym.exists() &&
+                    name.equals(sym.flatName()))
+                    ? sym
+                    : null;
+            }
+            else if (syms.classes.get(owner) != null) {
+                throw new AssertionError ("Cannot resolve: " + name + "resolved othermost: " + owner);    //NOI18N
+            }
+        } catch (CompletionFailure e) {
+        }
+        return null;
     }
 
     /**
@@ -378,6 +414,13 @@ public class JavacElements implements Elements {
         private void addMembers(WriteableScope scope, Type type) {
             members:
             for (Symbol e : type.asElement().members().getSymbols(NON_RECURSIVE)) {
+                ElementKind kind = e.getKind();
+                boolean isAbstract = (e.flags() & Flags.ABSTRACT) != 0;
+                if (kind == ElementKind.METHOD && isAbstract) {
+                    MethodSymbol impl = ((MethodSymbol)e).implementation((TypeSymbol)scope.owner, types, false);
+                    if (impl != null && impl != e)
+                        continue members;
+                }
                 for (Symbol overrider : scope.getSymbolsByName(e.getSimpleName())) {
                     if (overrider.kind == e.kind && (overrider.flags() & Flags.SYNTHETIC) == 0) {
                         if (overrider.getKind() == ElementKind.METHOD &&
@@ -387,7 +430,6 @@ public class JavacElements implements Elements {
                     }
                 }
                 boolean derived = e.getEnclosingElement() != scope.owner;
-                ElementKind kind = e.getKind();
                 boolean initializer = kind == ElementKind.CONSTRUCTOR
                     || kind == ElementKind.INSTANCE_INIT
                     || kind == ElementKind.STATIC_INIT;
@@ -548,8 +590,13 @@ public class JavacElements implements Elements {
     private Pair<JCTree, JCCompilationUnit> getTreeAndTopLevel(Element e) {
         Symbol sym = cast(Symbol.class, e);
         Env<AttrContext> enterEnv = getEnterEnv(sym);
-        if (enterEnv == null)
-            return null;
+        if (enterEnv == null) {
+            if (!loader.loadTreeFor(sym.enclClass(), false))
+                return null;
+            enterEnv = getEnterEnv(sym);
+            if (enterEnv == null)
+                return null;
+        }
         JCTree tree = TreeInfo.declarationFor(sym, enterEnv.tree);
         if (tree == null || enterEnv.toplevel == null)
             return null;
