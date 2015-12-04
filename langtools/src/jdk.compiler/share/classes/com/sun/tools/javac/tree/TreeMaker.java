@@ -79,6 +79,8 @@ public class TreeMaker implements JCTree.Factory {
      */
     protected TreeMaker(Context context) {
         context.put(treeMakerKey, this);
+        //ClassFinder needs to be instantiated before Symtab:
+        ClassFinder.instance(context);
         this.pos = Position.NOPOS;
         this.toplevel = null;
         this.names = Names.instance(context);
@@ -527,7 +529,7 @@ public class TreeMaker implements JCTree.Factory {
 
     public JCModifiers Modifiers(long flags, List<JCAnnotation> annotations) {
         JCModifiers tree = new JCModifiers(flags, annotations);
-        boolean noFlags = (flags & (Flags.ModifierFlags | Flags.ANNOTATION)) == 0;
+        boolean noFlags = (flags & (Flags.ModifierFlags | Flags.ANNOTATION | Flags.DEFAULT)) == 0;
         tree.pos = (noFlags && annotations.isEmpty()) ? Position.NOPOS : pos;
         return tree;
     }
@@ -735,7 +737,7 @@ public class TreeMaker implements JCTree.Factory {
             tp = TypeArray(Type(types.elemtype(t)));
             break;
         case ERROR:
-            tp = TypeIdent(ERROR);
+            tp = QualIdent(t.tsym);
             break;
         default:
             throw new AssertionError("unexpected type: " + t);
@@ -956,6 +958,11 @@ public class TreeMaker implements JCTree.Factory {
     /** Construct an assignment from a variable symbol and a right hand side.
      */
     public JCStatement Assignment(Symbol v, JCExpression rhs) {
+        if (rhs.hasTag(JCTree.Tag.ERRONEOUS)) {
+            JCErroneous err = (JCErroneous)rhs;
+            if (err.errs.head != null && err.errs.head.hasTag(JCTree.Tag.THROW))
+                return (JCThrow)err.errs.head;
+        }
         return Exec(Assign(Ident(v), rhs).setType(v.type));
     }
 
@@ -983,7 +990,9 @@ public class TreeMaker implements JCTree.Factory {
         if (sym.name == names.empty ||
             sym.owner == null ||
             sym.owner == syms.rootPackage ||
-            sym.owner.kind == MTH || sym.owner.kind == VAR) {
+            sym.owner.kind == MTH || sym.owner.kind == VAR
+            || (sym.owner.kind == PCK && sym.owner.name == names.empty)
+            || (sym.owner.kind == NIL && sym.owner.name == names.empty)) {
             return true;
         } else if (sym.kind == TYP && toplevel != null) {
             Iterator<Symbol> it = toplevel.namedImportScope.getSymbolsByName(sym.name).iterator();

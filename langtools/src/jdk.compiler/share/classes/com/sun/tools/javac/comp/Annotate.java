@@ -1231,6 +1231,11 @@ public class Annotate {
                 repeatable = Annotate.this.attributeAnnotation(tree, tab.repeatableType, env);
             }
         }
+
+        @Override
+        public void visitErroneous(JCErroneous tree) {
+            scan(tree.errs);
+        }
     }
 
     /** Represents the semantics of an Annotation Type.
