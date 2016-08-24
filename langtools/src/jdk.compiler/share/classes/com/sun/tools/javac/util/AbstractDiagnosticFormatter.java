@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,6 +22,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package com.sun.tools.javac.util;
 
 import java.nio.file.Path;
@@ -45,7 +46,7 @@ import com.sun.tools.javac.code.Printer;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.CapturedType;
-import com.sun.tools.javac.file.BaseFileObject;
+import com.sun.tools.javac.file.PathFileObject;
 import com.sun.tools.javac.jvm.Profile;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.tree.Pretty;
@@ -144,10 +145,10 @@ public abstract class AbstractDiagnosticFormatter implements DiagnosticFormatter
             throw new IllegalArgumentException(); // d should have source set
         if (fullname)
             return fo.getName();
-        else if (fo instanceof BaseFileObject)
-            return ((BaseFileObject) fo).getShortName();
+        else if (fo instanceof PathFileObject)
+            return ((PathFileObject) fo).getShortName();
         else
-            return BaseFileObject.getSimpleName(fo);
+            return PathFileObject.getSimpleName(fo);
     }
 
     /**
@@ -404,13 +405,13 @@ public abstract class AbstractDiagnosticFormatter implements DiagnosticFormatter
         public SimpleConfiguration(Options options, Set<DiagnosticPart> parts) {
             this(parts);
             String showSource = null;
-            if ((showSource = options.get("showSource")) != null) {
+            if ((showSource = options.get("diags.showSource")) != null) {
                 if (showSource.equals("true"))
                     setVisiblePart(DiagnosticPart.SOURCE, true);
                 else if (showSource.equals("false"))
                     setVisiblePart(DiagnosticPart.SOURCE, false);
             }
-            String diagOpts = options.get("diags");
+            String diagOpts = options.get("diags.formatterOptions");
             if (diagOpts != null) {//override -XDshowSource
                 Collection<String> args = Arrays.asList(diagOpts.split(","));
                 if (args.contains("short")) {
@@ -423,7 +424,7 @@ public abstract class AbstractDiagnosticFormatter implements DiagnosticFormatter
                     setVisiblePart(DiagnosticPart.SOURCE, false);
             }
             String multiPolicy = null;
-            if ((multiPolicy = options.get("multilinePolicy")) != null) {
+            if ((multiPolicy = options.get("diags.multilinePolicy")) != null) {
                 if (multiPolicy.equals("disabled"))
                     setVisiblePart(DiagnosticPart.SUBDIAGNOSTICS, false);
                 else if (multiPolicy.startsWith("limit:")) {
@@ -448,7 +449,7 @@ public abstract class AbstractDiagnosticFormatter implements DiagnosticFormatter
                 }
             }
             String showCaret = null;
-            if (((showCaret = options.get("showCaret")) != null) &&
+            if (((showCaret = options.get("diags.showCaret")) != null) &&
                 showCaret.equals("false"))
                     setCaretEnabled(false);
             else

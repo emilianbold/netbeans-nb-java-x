@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,17 +27,28 @@ package com.sun.tools.javac.code;
 
 import java.lang.annotation.Annotation;
 import java.lang.annotation.Inherited;
+import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-import javax.lang.model.element.*;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ElementVisitor;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Modifier;
+import javax.lang.model.element.ModuleElement;
+import javax.lang.model.element.NestingKind;
+import javax.lang.model.element.PackageElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.TypeParameterElement;
+import javax.lang.model.element.VariableElement;
 import javax.lang.model.util.ElementScanner6;
+import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
 
-import com.sun.tools.javac.code.Attribute.Compound;
-import com.sun.tools.javac.code.TypeAnnotations.AnnotationType;
-import com.sun.tools.javac.code.TypeMetadata.Entry;
-import com.sun.tools.javac.comp.Annotate.AnnotationTypeCompleter;
+import com.sun.tools.javac.code.ClassFinder.BadEnclosingMethodAttr;
+import com.sun.tools.javac.code.Kinds.Kind;
 import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Type.*;
@@ -46,20 +57,28 @@ import com.sun.tools.javac.comp.AttrContext;
 import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.jvm.*;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.tree.JCTree.Tag;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.DefinedBy.Api;
 import com.sun.tools.javac.util.Name;
+
 import static com.sun.tools.javac.code.Flags.*;
 import static com.sun.tools.javac.code.Kinds.*;
 import static com.sun.tools.javac.code.Kinds.Kind.*;
 import static com.sun.tools.javac.code.Scope.LookupKind.NON_RECURSIVE;
+import static com.sun.tools.javac.code.Symbol.OperatorSymbol.AccessCode.FIRSTASGOP;
 import static com.sun.tools.javac.code.TypeTag.CLASS;
 import static com.sun.tools.javac.code.TypeTag.ERROR;
 import static com.sun.tools.javac.code.TypeTag.FORALL;
 import static com.sun.tools.javac.code.TypeTag.TYPEVAR;
 import static com.sun.tools.javac.code.TypeTag.UNKNOWN;
+import static com.sun.tools.javac.jvm.ByteCodes.iadd;
+import static com.sun.tools.javac.jvm.ByteCodes.ishll;
+import static com.sun.tools.javac.jvm.ByteCodes.lushrl;
+import static com.sun.tools.javac.jvm.ByteCodes.lxor;
+import static com.sun.tools.javac.jvm.ByteCodes.string_add;
 
 /** Root class for Java symbols. It contains subclasses
  *  for specific sorts of symbols, such as variables, methods and operators,
@@ -429,6 +448,9 @@ public abstract class Symbol extends AnnoConstruct implements Element {
     }
 
     /** The closest enclosing class of this symbol's declaration.
+     *  Warning: this (misnamed) method returns the receiver itself
+     *  when the receiver is a class (as opposed to its enclosing
+     *  class as one may be misled to believe.)
      */
     public ClassSymbol enclClass() {
         Symbol c = this;
@@ -755,8 +777,11 @@ public abstract class Symbol extends AnnoConstruct implements Element {
             }
             for (Symbol sym : members().getSymbols(NON_RECURSIVE)) {
                 try {
-                    if (sym != null && (sym.flags() & SYNTHETIC) == 0 && sym.owner == this)
+                    if (sym != null && (sym.flags() & SYNTHETIC) == 0 && sym.owner == this) {
                         list = list.prepend(sym);
+                    }
+                } catch (BadEnclosingMethodAttr badEnclosingMethod) {
+                    // ignore the exception
                 } catch (CompletionFailure cf) {}
             }
             return list;
@@ -848,7 +873,7 @@ public abstract class Symbol extends AnnoConstruct implements Element {
             boolean isCurrentSymbolsAnnotation(Attribute.TypeCompound anno, int index) {
                 return (anno.position.type == TargetType.CLASS_TYPE_PARAMETER ||
                         anno.position.type == TargetType.METHOD_TYPE_PARAMETER) &&
-                       anno.position.parameter_index == index;
+                        anno.position.parameter_index == index;
             }
 
 
@@ -856,6 +881,119 @@ public abstract class Symbol extends AnnoConstruct implements Element {
         public <R, P> R accept(ElementVisitor<R, P> v, P p) {
             return v.visitTypeParameter(this, p);
         }
+    }
+    /** A class for module symbols.
+     */
+    public static class ModuleSymbol extends TypeSymbol
+            implements ModuleElement {
+
+        public Name version;
+        public JavaFileManager.Location sourceLocation;
+        public JavaFileManager.Location classLocation;
+
+        /** All directives, in natural order. */
+        public List<com.sun.tools.javac.code.Directive> directives;
+        public List<com.sun.tools.javac.code.Directive.RequiresDirective> requires;
+        public List<com.sun.tools.javac.code.Directive.ExportsDirective> exports;
+        public List<com.sun.tools.javac.code.Directive.ProvidesDirective> provides;
+        public List<com.sun.tools.javac.code.Directive.UsesDirective> uses;
+
+        public ClassSymbol module_info;
+
+        public PackageSymbol unnamedPackage;
+        public Map<Name, PackageSymbol> visiblePackages;
+        public List<Symbol> enclosedPackages = List.nil();
+
+        public Completer usesProvidesCompleter = Completer.NULL_COMPLETER;
+
+        /**
+         * Create a ModuleSymbol with an associated module-info ClassSymbol.
+         * The name of the module may be null, if it is not known yet.
+         */
+        public static ModuleSymbol create(Name name, Name module_info) {
+            ModuleSymbol msym = new ModuleSymbol(name, null);
+            ClassSymbol info = new ClassSymbol(Flags.MODULE, module_info, msym);
+            info.fullname = formFullName(module_info, msym);
+            info.flatname = info.fullname;
+            info.members_field = WriteableScope.create(info);
+            msym.module_info = info;
+            return msym;
+        }
+
+        public ModuleSymbol(Name name, Symbol owner) {
+            super(MDL, 0, name, null, owner);
+            Assert.checkNonNull(name);
+            this.type = new ModuleType(this);
+        }
+
+        @Override @DefinedBy(Api.LANGUAGE_MODEL)
+        public boolean isUnnamed() {
+            return name.isEmpty() && owner == null;
+        }
+
+        public boolean isNoModule() {
+            return false;
+        }
+
+        @Override @DefinedBy(Api.LANGUAGE_MODEL)
+        public ElementKind getKind() {
+            return ElementKind.MODULE;
+        }
+
+        @Override @DefinedBy(Api.LANGUAGE_MODEL)
+        public java.util.List<Directive> getDirectives() {
+            completeUsesProvides();
+            return Collections.unmodifiableList(directives);
+        }
+
+        public void completeUsesProvides() {
+            complete();
+            if (usesProvidesCompleter != Completer.NULL_COMPLETER) {
+                Completer c = usesProvidesCompleter;
+                usesProvidesCompleter = Completer.NULL_COMPLETER;
+                c.complete(this);
+            }
+        }
+
+        @Override
+        public ClassSymbol outermostClass() {
+            return null;
+        }
+
+        @Override
+        public String toString() {
+            // TODO: the following strings should be localized
+            // Do this with custom anon subtypes in Symtab
+            String n = (name == null) ? "<unknown>"
+                    : (name.isEmpty()) ? "<unnamed>"
+                    : String.valueOf(name);
+            return n;
+        }
+
+        @Override @DefinedBy(Api.LANGUAGE_MODEL)
+        public <R, P> R accept(ElementVisitor<R, P> v, P p) {
+            return v.visitModule(this, p);
+        }
+
+        @Override @DefinedBy(Api.LANGUAGE_MODEL)
+        public List<Symbol> getEnclosedElements() {
+            List<Symbol> list = List.nil();
+            for (Symbol sym : enclosedPackages) {
+                if (sym.members().anyMatch(m -> m.kind == TYP))
+                    list = list.prepend(sym);
+            }
+            return list;
+        }
+
+        public void reset() {
+            this.directives = null;
+            this.requires = null;
+            this.exports = null;
+            this.provides = null;
+            this.uses = null;
+            this.visiblePackages = null;
+        }
+
     }
 
     /** A class for package symbols
@@ -866,6 +1004,7 @@ public abstract class Symbol extends AnnoConstruct implements Element {
         public WriteableScope members_field;
         public Name fullname;
         public ClassSymbol package_info; // see bug 6443073
+        public ModuleSymbol modle;
 
         public PackageSymbol(Name name, Type type, Symbol owner) {
             super(PCK, 0, name, type, owner);
@@ -940,7 +1079,7 @@ public abstract class Symbol extends AnnoConstruct implements Element {
 
         @DefinedBy(Api.LANGUAGE_MODEL)
         public Symbol getEnclosingElement() {
-            return null;
+            return modle != null && !modle.isNoModule() ? modle : null;
         }
 
         @DefinedBy(Api.LANGUAGE_MODEL)
@@ -1260,15 +1399,15 @@ public abstract class Symbol extends AnnoConstruct implements Element {
                 t.interfaces_field = null;
                 t.all_interfaces_field = null;
             }
-            resetMetadata();
+            clearAnnotationMetadata();
         }
 
-        public void resetMetadata() {
+        public void clearAnnotationMetadata() {
             metadata = null;
-            resetAnnotationTypeMetadata();
+            clearAnnotationTypeMetadata();
         }
         
-        public void resetAnnotationTypeMetadata() {
+        public void clearAnnotationTypeMetadata() {
             annotationTypeMetadata = AnnotationTypeMetadata.notAnAnnotationType();
         }
 
@@ -1914,14 +2053,89 @@ public abstract class Symbol extends AnnoConstruct implements Element {
     public static class OperatorSymbol extends MethodSymbol {
 
         public int opcode;
+        private int accessCode = Integer.MIN_VALUE;
 
         public OperatorSymbol(Name name, Type type, int opcode, Symbol owner) {
             super(PUBLIC | STATIC, name, type, owner);
             this.opcode = opcode;
         }
 
+        @Override
         public <R, P> R accept(Symbol.Visitor<R, P> v, P p) {
             return v.visitOperatorSymbol(this, p);
+        }
+
+        public int getAccessCode(Tag tag) {
+            if (accessCode != Integer.MIN_VALUE && !tag.isIncOrDecUnaryOp()) {
+                return accessCode;
+            }
+            accessCode = AccessCode.from(tag, opcode);
+            return accessCode;
+        }
+
+        /** Access codes for dereferencing, assignment,
+         *  and pre/post increment/decrement.
+
+         *  All access codes for accesses to the current class are even.
+         *  If a member of the superclass should be accessed instead (because
+         *  access was via a qualified super), add one to the corresponding code
+         *  for the current class, making the number odd.
+         *  This numbering scheme is used by the backend to decide whether
+         *  to issue an invokevirtual or invokespecial call.
+         *
+         *  @see Gen#visitSelect(JCFieldAccess tree)
+         */
+        public enum AccessCode {
+            UNKNOWN(-1, Tag.NO_TAG),
+            DEREF(0, Tag.NO_TAG),
+            ASSIGN(2, Tag.ASSIGN),
+            PREINC(4, Tag.PREINC),
+            PREDEC(6, Tag.PREDEC),
+            POSTINC(8, Tag.POSTINC),
+            POSTDEC(10, Tag.POSTDEC),
+            FIRSTASGOP(12, Tag.NO_TAG);
+
+            public final int code;
+            public final Tag tag;
+            public static final int numberOfAccessCodes = (lushrl - ishll + lxor + 2 - iadd) * 2 + FIRSTASGOP.code + 2;
+
+            AccessCode(int code, Tag tag) {
+                this.code = code;
+                this.tag = tag;
+            }
+
+            static public AccessCode getFromCode(int code) {
+                for (AccessCode aCodes : AccessCode.values()) {
+                    if (aCodes.code == code) {
+                        return aCodes;
+                    }
+                }
+                return UNKNOWN;
+            }
+
+            static int from(Tag tag, int opcode) {
+                /** Map bytecode of binary operation to access code of corresponding
+                *  assignment operation. This is always an even number.
+                */
+                switch (tag) {
+                    case PREINC:
+                        return AccessCode.PREINC.code;
+                    case PREDEC:
+                        return AccessCode.PREDEC.code;
+                    case POSTINC:
+                        return AccessCode.POSTINC.code;
+                    case POSTDEC:
+                        return AccessCode.POSTDEC.code;
+                }
+                if (iadd <= opcode && opcode <= lxor) {
+                    return (opcode - iadd) * 2 + FIRSTASGOP.code;
+                } else if (opcode == string_add) {
+                    return (lxor + 1 - iadd) * 2 + FIRSTASGOP.code;
+                } else if (ishll <= opcode && opcode <= lushrl) {
+                    return (opcode - ishll + lxor + 2 - iadd) * 2 + FIRSTASGOP.code;
+                }
+                return -1;
+            }
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -110,14 +110,13 @@ class CompletenessAnalyzer {
 
         private static CaLog createLog(Context context) {
             PrintWriter pw = new PrintWriter(new StringWriter());
-            CaLog log = new CaLog(context, pw, pw, pw);
-            context.put(outKey, pw);
+            CaLog log = new CaLog(context, pw);
             context.put(logKey, log);
             return log;
         }
 
-        private CaLog(Context context, PrintWriter errWriter, PrintWriter warnWriter, PrintWriter noticeWriter) {
-            super(context, errWriter, warnWriter, noticeWriter);
+        private CaLog(Context context, PrintWriter pw) {
+            super(context, pw);
         }
 
         @Override
@@ -231,7 +230,7 @@ class CompletenessAnalyzer {
 
         // Declarations and type parameters (thus expressions)
         EXTENDS(TokenKind.EXTENDS, XEXPR|XDECL),  //  extends
-        COMMA(TokenKind.COMMA, XEXPR|XDECL|XSTART),  //  ,
+        COMMA(TokenKind.COMMA, XEXPR|XDECL),  //  ,
         AMP(TokenKind.AMP, XEXPR|XDECL),  //  &
         GT(TokenKind.GT, XEXPR|XDECL),  //  >
         LT(TokenKind.LT, XEXPR|XDECL1),  //  <

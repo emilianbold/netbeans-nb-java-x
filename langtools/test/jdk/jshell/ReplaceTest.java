@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,15 @@
  */
 
 /*
- * @test
+ * @test 8080069 8152925
  * @summary Test of Snippet redefinition and replacement.
  * @build KullaTesting TestingInputStream
  * @run testng ReplaceTest
  */
 
-import java.util.Collection;
-
+import java.util.Iterator;
+import java.util.List;
+import java.util.stream.Stream;
 import jdk.jshell.Snippet;
 import jdk.jshell.MethodSnippet;
 import jdk.jshell.PersistentSnippet;
@@ -38,9 +39,12 @@ import jdk.jshell.VarSnippet;
 import jdk.jshell.DeclarationSnippet;
 import org.testng.annotations.Test;
 
+import jdk.jshell.SnippetEvent;
+import jdk.jshell.UnresolvedReferenceException;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static jdk.jshell.Snippet.Status.*;
 import static jdk.jshell.Snippet.SubKind.*;
-import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
 @Test
@@ -87,18 +91,22 @@ public class ReplaceTest extends KullaTesting {
         assertActiveKeys();
     }
 
+    private <T extends Snippet> void identityMatch(Stream<T> got, T expected) {
+        Iterator<T> it = got.iterator();
+        assertTrue(it.hasNext(), "expected exactly one");
+        assertTrue(expected == it.next(), "Identity must not change");
+        assertFalse(it.hasNext(), "expected exactly one");
+    }
+
     public void testReplaceVarToMethod() {
         Snippet x = varKey(assertEval("int x;"));
-        Snippet musn = methodKey(assertEval("double mu() { return x * 4; }"));
+        MethodSnippet musn = methodKey(assertEval("double mu() { return x * 4; }"));
         assertEval("x == 0;", "true");
         assertEval("mu() == 0.0;", "true");
         assertEval("double x = 2.5;",
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(musn, VALID, VALID, false, MAIN_SNIPPET));
-        Collection<MethodSnippet> meths = getState().methods();
-        assertEquals(meths.size(), 1);
-        assertTrue(musn == meths.iterator().next(), "Identity must not change");
+                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
+        identityMatch(getState().methods(), musn);
         assertEval("x == 2.5;", "true");
         assertEval("mu() == 10.0;", "true");  // Auto redefine
         assertActiveKeys();
@@ -112,8 +120,7 @@ public class ReplaceTest extends KullaTesting {
         assertEval("d();", "1060.0");
         assertEval("int a() { return 5; }",
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(a, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(b, VALID, VALID, false, MAIN_SNIPPET));
+                ste(a, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
         assertEval("d();", "1150.0");
         assertActiveKeys();
     }
@@ -124,24 +131,20 @@ public class ReplaceTest extends KullaTesting {
         assertEval("m();", "7");
         assertEval("class C { int x = 99; int f() { return x; } }",
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(c, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(m, VALID, VALID, false, MAIN_SNIPPET));
+                ste(c, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
         assertEval("m();", "99");
         assertActiveKeys();
     }
 
     public void testReplaceVarToClass() {
         Snippet x = varKey(assertEval("int x;"));
-        Snippet c = classKey(assertEval("class A { double a = 4 * x; }"));
+        TypeDeclSnippet c = classKey(assertEval("class A { double a = 4 * x; }"));
         assertEval("x == 0;", "true");
         assertEval("new A().a == 0.0;", "true");
         assertEval("double x = 2.5;",
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(c, VALID, VALID, false, MAIN_SNIPPET));
-        Collection<TypeDeclSnippet> classes = getState().types();
-        assertEquals(classes.size(), 1);
-        assertTrue(c == classes.iterator().next(), "Identity must not change");
+                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
+        identityMatch(getState().types(), c);
         assertEval("x == 2.5;", "true");
         assertEval("new A().a == 10.0;", "true");
         assertActiveKeys();
@@ -149,17 +152,14 @@ public class ReplaceTest extends KullaTesting {
 
     public void testReplaceMethodToClass() {
         Snippet x = methodKey(assertEval("int x() { return 0; }"));
-        Snippet c = classKey(assertEval("class A { double a = 4 * x(); }"));
+        TypeDeclSnippet c = classKey(assertEval("class A { double a = 4 * x(); }"));
         assertEval("x() == 0;", "true");
         assertEval("new A().a == 0.0;", "true");
         assertEval("double x() { return 2.5; }",
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(c, VALID, VALID, false, MAIN_SNIPPET));
+                ste(x, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
         assertEval("x();", "2.5");
-        Collection<TypeDeclSnippet> classes = getState().types();
-        assertEquals(classes.size(), 1);
-        assertTrue(c == classes.iterator().next(), "Identity must not change");
+        identityMatch(getState().types(), c);
         assertEval("x() == 2.5;", "true");
         assertEval("new A().a == 10.0;", "true");
         assertActiveKeys();
@@ -259,7 +259,7 @@ public class ReplaceTest extends KullaTesting {
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
                 ste(g, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
                 ste(f, VALID, RECOVERABLE_DEFINED, false, MAIN_SNIPPET));
-        MethodSnippet exsn = assertEvalUnresolvedException("t();", "f", 0, 1);
+        DeclarationSnippet exsn = assertEvalUnresolvedException("t();", "f", 0, 1);
         assertTrue(exsn == f, "Identity must not change");
         assertActiveKeys();
     }
@@ -289,36 +289,119 @@ public class ReplaceTest extends KullaTesting {
     }
 
     public void testForwardVarToClass() {
-        DeclarationSnippet a = classKey(assertEval("class A { int f() { return g; } }", added(RECOVERABLE_NOT_DEFINED)));
-        assertUnresolvedDependencies1(a, RECOVERABLE_NOT_DEFINED, "variable g");
+        DeclarationSnippet a = classKey(assertEval("class A { int f() { return g; } }", added(RECOVERABLE_DEFINED)));
+        assertUnresolvedDependencies1(a, RECOVERABLE_DEFINED, "variable g");
         Snippet g = varKey(assertEval("int g = 10;", "10",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null)));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null)));
         assertEval("new A().f();", "10");
         assertEval("double g = 10;", "10.0", null,
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
                 ste(g, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, MAIN_SNIPPET));
+                ste(a, VALID, RECOVERABLE_DEFINED, false, MAIN_SNIPPET));
         assertUnresolvedDependencies(a, 0);
         assertActiveKeys();
     }
 
+    public void testForwardVarToClassGeneric() {
+        DeclarationSnippet a = classKey(assertEval("class A<T> { final T x; A(T v) { this.x = v; } ; T get() { return x; } int core() { return g; } }", added(RECOVERABLE_DEFINED)));
+        assertUnresolvedDependencies1(a, RECOVERABLE_DEFINED, "variable g");
+
+        List<SnippetEvent> events = assertEval("A<String> as = new A<>(\"hi\");", null,
+                UnresolvedReferenceException.class, DiagCheck.DIAG_OK, DiagCheck.DIAG_OK, null);
+        SnippetEvent ste = events.get(0);
+        Snippet assn = ste.snippet();
+        DeclarationSnippet unsn = ((UnresolvedReferenceException) ste.exception()).getSnippet();
+        assertEquals(unsn.name(), "A", "Wrong with unresolved");
+        assertEquals(getState().unresolvedDependencies(unsn).count(), 1, "Wrong size unresolved");
+        assertEquals(getState().diagnostics(unsn).count(), 0L, "Expected no diagnostics");
+
+        Snippet g = varKey(assertEval("int g = 10;", "10",
+                added(VALID),
+                ste(a, RECOVERABLE_DEFINED, VALID, false, MAIN_SNIPPET)));
+        assertEval("A<String> as = new A<>(\"low\");",
+                ste(MAIN_SNIPPET, VALID, VALID, false, null),
+                ste(assn, VALID, OVERWRITTEN, false, MAIN_SNIPPET));
+        assertEval("as.get();", "\"low\"");
+        assertUnresolvedDependencies(a, 0);
+        assertActiveKeys();
+    }
+
+   public void testForwardVarToClassExtendsImplements() {
+        DeclarationSnippet ik = classKey(assertEval("interface I { default int ii() { return 1; } }", added(VALID)));
+        DeclarationSnippet jk = classKey(assertEval("interface J { default int jj() { return 2; } }", added(VALID)));
+        DeclarationSnippet ck = classKey(assertEval("class C { int cc() { return 3; } }", added(VALID)));
+        DeclarationSnippet dk = classKey(assertEval("class D extends C implements I,J { int dd() { return g; } }", added(RECOVERABLE_DEFINED)));
+        DeclarationSnippet ek = classKey(assertEval("class E extends D { int ee() { return 5; } }", added(VALID)));
+        assertUnresolvedDependencies1(dk, RECOVERABLE_DEFINED, "variable g");
+        assertEvalUnresolvedException("new D();", "D", 1, 0);
+        assertEvalUnresolvedException("new E();", "D", 1, 0);
+        VarSnippet g = varKey(assertEval("int g = 10;", "10",
+                added(VALID),
+                ste(dk, RECOVERABLE_DEFINED, VALID, false, MAIN_SNIPPET)));
+        assertEval("E e = new E();");
+        assertDrop(g,
+                ste(g, VALID, DROPPED, true, null),
+                ste(dk, VALID, RECOVERABLE_DEFINED, false, g));
+        assertEvalUnresolvedException("new D();", "D", 1, 0);
+        assertEvalUnresolvedException("new E();", "D", 1, 0);
+        assertEval("e.ee();", "5");
+        assertEvalUnresolvedException("e.dd();", "D", 1, 0);
+        assertEval("e.cc();", "3");
+        assertEval("e.jj();", "2");
+        assertEval("e.ii();", "1");
+        assertActiveKeys();
+    }
+
+    public void testForwardVarToInterface() {
+        DeclarationSnippet i = classKey(assertEval("interface I { default int f() { return x; } }", added(RECOVERABLE_DEFINED)));
+        assertUnresolvedDependencies1(i, RECOVERABLE_DEFINED, "variable x");
+        DeclarationSnippet c = classKey(assertEval("class C implements I { int z() { return 2; } }", added(VALID)));
+        assertEval("C c = new C();");
+        assertEval("c.z();", "2");
+        assertEvalUnresolvedException("c.f()", "I", 1, 0);
+        Snippet g = varKey(assertEval("int x = 55;", "55",
+                added(VALID),
+                ste(i, RECOVERABLE_DEFINED, VALID, false, null)));
+        assertEval("c.f();", "55");
+        assertUnresolvedDependencies(i, 0);
+        assertActiveKeys();
+    }
+
+    public void testForwardVarToEnum() {
+        DeclarationSnippet a = classKey(assertEval("enum E { Q, W, E; float ff() { return fff; } }", added(RECOVERABLE_DEFINED)));
+        assertUnresolvedDependencies1(a, RECOVERABLE_DEFINED, "variable fff");
+        Snippet g = varKey(assertEval("float fff = 4.5f;", "4.5",
+                added(VALID),
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null)));
+        assertEval("E.Q.ff();", "4.5");
+        assertEval("double fff = 3.3;", "3.3", null,
+                DiagCheck.DIAG_OK,
+                DiagCheck.DIAG_ERROR,
+                ste(MAIN_SNIPPET, VALID, VALID, true, null),
+                ste(g, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
+                ste(a, VALID, RECOVERABLE_DEFINED, false, MAIN_SNIPPET));
+        assertUnresolvedDependencies(a, 0);
+        assertActiveKeys();
+    }
 
     public void testForwardMethodToClass() {
-        DeclarationSnippet a = classKey(assertEval("class A { int f() { return g(); } }", added(RECOVERABLE_NOT_DEFINED)));
-        assertUnresolvedDependencies1(a, RECOVERABLE_NOT_DEFINED, "method g()");
+        DeclarationSnippet a = classKey(assertEval("class A { int f() { return g(); } }", added(RECOVERABLE_DEFINED)));
+        assertUnresolvedDependencies1(a, RECOVERABLE_DEFINED, "method g()");
+        assertEval("A foo() { return null; }");
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         Snippet g = methodKey(assertEval("int g() { return 10; }",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null)));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null)));
         assertEval("new A().f();", "10");
         assertEval("double g() { return 10; }",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
                 ste(g, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, MAIN_SNIPPET));
+                ste(a, VALID, RECOVERABLE_DEFINED, false, MAIN_SNIPPET));
         assertUnresolvedDependencies(a, 0);
         assertActiveKeys();
     }
@@ -336,8 +419,8 @@ public class ReplaceTest extends KullaTesting {
                 DiagCheck.DIAG_ERROR,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
                 ste(b, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, MAIN_SNIPPET));
-        assertDeclareFail("new A().b;", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, true, MAIN_SNIPPET));
+        assertEvalUnresolvedException("new A().b;", "A", 0, 1);
         assertActiveKeys();
     }
 
@@ -503,42 +586,42 @@ public class ReplaceTest extends KullaTesting {
 
     public void testForwardSingleImportMethodToClass1() {
         PersistentSnippet a = classKey(assertEval("class A { String s = format(\"%d\", 10); }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.String.format;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
         assertEval("new A().s;", "\"10\"");
         PersistentSnippet format = methodKey(assertEval("void format(String s, int d) { }",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, MAIN_SNIPPET)));
-        assertDeclareFail("new A().s;", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, MAIN_SNIPPET)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(format,
                 ste(format, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, format));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, format));
     }
 
     public void testForwardSingleImportMethodToClass2() {
         PersistentSnippet a = classKey(assertEval("class A { String s() { return format(\"%d\", 10); } }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.String.format;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
         assertEval("new A().s();", "\"10\"");
         PersistentSnippet format = methodKey(assertEval("void format(String s, int d) { }",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A().s();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(format,
                 ste(format, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, format));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, format));
     }
 
     public void testForwardSingleImportClassToClass1() {
@@ -589,42 +672,44 @@ public class ReplaceTest extends KullaTesting {
 
     public void testForwardImportOnDemandMethodToClass1() {
         PersistentSnippet a = classKey(assertEval("class A { String s = format(\"%d\", 10); }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.String.*;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
-        assertEval("new A().s;", "\"10\"");
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
+        assertEval("A x = new A();");
+        assertEval("x.s;", "\"10\"");
         PersistentSnippet format = methodKey(assertEval("void format(String s, int d) { }",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A().s;", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(format,
                 ste(format, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, format));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, format));
+        assertEval("x.s;", "\"10\"");
     }
 
     public void testForwardImportOnDemandMethodToClass2() {
         PersistentSnippet a = classKey(assertEval("class A { String s() { return format(\"%d\", 10); } }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.String.*;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
         assertEval("new A().s();", "\"10\"");
         PersistentSnippet format = methodKey(assertEval("void format(String s, int d) { }",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A().s();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(format,
                 ste(format, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, format));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, format));
     }
 
     public void testForwardImportOnDemandClassToClass1() {
@@ -673,86 +758,87 @@ public class ReplaceTest extends KullaTesting {
 
     public void testForwardSingleImportFieldToClass1() {
         PersistentSnippet a = classKey(assertEval("class A { static double pi() { return PI; } }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.Math.PI;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
         assertEval("Math.abs(A.pi() - 3.1415) < 0.001;", "true");
 
         PersistentSnippet list = varKey(assertEval("String PI;",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(list,
                 ste(list, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, list));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, list));
     }
 
     public void testForwardSingleImportFieldToClass2() {
         PersistentSnippet a = classKey(assertEval("class A { static double pi = PI; }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.Math.PI;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, true, null));
         assertEval("Math.abs(A.pi - 3.1415) < 0.001;", "true");
 
         PersistentSnippet list = varKey(assertEval("String PI;",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, true, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(list,
                 ste(list, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, list));
+                ste(a, RECOVERABLE_DEFINED, VALID, true, list));
     }
 
     public void testForwardImportOnDemandFieldToClass1() {
         PersistentSnippet a = classKey(assertEval("class A { static double pi() { return PI; } }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.Math.*;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, null));
         assertEval("Math.abs(A.pi() - 3.1415) < 0.001;", "true");
 
         PersistentSnippet list = varKey(assertEval("String PI;",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, false, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(list,
                 ste(list, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, list));
+                ste(a, RECOVERABLE_DEFINED, VALID, false, list));
     }
 
     public void testForwardImportOnDemandFieldToClass2() {
         PersistentSnippet a = classKey(assertEval("class A { static double pi = PI; }",
-                added(RECOVERABLE_NOT_DEFINED)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                added(RECOVERABLE_DEFINED)));
+        assertEvalUnresolvedException("new A();", "A", 1, 0);
         assertEval("import static java.lang.Math.*;",
                 added(VALID),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, null));
+                ste(a, RECOVERABLE_DEFINED, VALID, true, null));
         assertEval("Math.abs(A.pi - 3.1415) < 0.001;", "true");
 
         PersistentSnippet list = varKey(assertEval("String PI;",
                 DiagCheck.DIAG_OK,
                 DiagCheck.DIAG_ERROR,
                 added(VALID),
-                ste(a, VALID, RECOVERABLE_NOT_DEFINED, true, null)));
-        assertDeclareFail("new A();", "compiler.err.cant.resolve.location");
+                ste(a, VALID, RECOVERABLE_DEFINED, true, null)));
+        assertEvalUnresolvedException("new A();", "A", 0, 1);
         assertActiveKeys();
         assertDrop(list,
                 ste(list, VALID, DROPPED, true, null),
-                ste(a, RECOVERABLE_NOT_DEFINED, VALID, true, list));
+                ste(a, RECOVERABLE_DEFINED, VALID, true, list));
+        assertEval("Math.abs(A.pi - 3.1415) < 0.001;", "true");
     }
 
     public void testReplaceCausesMethodReferenceError() {
@@ -786,18 +872,15 @@ public class ReplaceTest extends KullaTesting {
         MethodSnippet k1 = methodKey(assertEval(ms1, added(VALID)));
         VarSnippet xd = varKey(assertEval(xsd,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(xi, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(k1, VALID, VALID, false, MAIN_SNIPPET)));
+                ste(xi, VALID, OVERWRITTEN, false, MAIN_SNIPPET)));
         MethodSnippet k2 = methodKey(assertEval(ms2,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null), //TODO: technically, should be false
                 ste(k1, VALID, OVERWRITTEN, false, MAIN_SNIPPET)));
         VarSnippet xi2 = varKey(assertEval(xsi,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(xd, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(k2, VALID, VALID, false, MAIN_SNIPPET)));
+                ste(xd, VALID, OVERWRITTEN, false, MAIN_SNIPPET)));
         varKey(assertEval(xsd,
                 ste(MAIN_SNIPPET, VALID, VALID, true, null),
-                ste(xi2, VALID, OVERWRITTEN, false, MAIN_SNIPPET),
-                ste(k2, VALID, VALID, false, MAIN_SNIPPET)));
+                ste(xi2, VALID, OVERWRITTEN, false, MAIN_SNIPPET)));
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,18 +27,17 @@
  * @bug 8135131
   * @library /tools/lib
  * @modules jdk.compiler/com.sun.tools.javac.api
- *          jdk.compiler/com.sun.tools.javac.file
  *          jdk.compiler/com.sun.tools.javac.main
  *          jdk.compiler/com.sun.tools.sjavac
- * @build Wrapper ToolBox
+ * @build Wrapper toolbox.ToolBox toolbox.Assert
  * @run main Wrapper NoState
  */
-
-import com.sun.tools.javac.util.Assert;
 
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.stream.Stream;
+
+import toolbox.Assert;
 
 public class NoState extends SJavacTester {
     public static void main(String... args) throws Exception {
@@ -46,12 +45,9 @@ public class NoState extends SJavacTester {
     }
 
     public void run() throws Exception {
-        clean(TEST_ROOT);
-        ToolBox tb = new ToolBox();
         tb.writeFile(GENSRC.resolve("pkg/A.java"), "package pkg; class A {}");
         Files.createDirectory(BIN);
         compile("-d", BIN.toString(),
-                "--server:portfile=testserver,background=false",
                 GENSRC + "/pkg/A.java");
 
         // Make sure file was compiled
