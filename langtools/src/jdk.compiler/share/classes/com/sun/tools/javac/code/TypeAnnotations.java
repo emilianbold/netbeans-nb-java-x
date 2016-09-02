@@ -245,9 +245,7 @@ public class TypeAnnotations {
             // Type annotations and declaration annotations on an
             // Element
         } else {
-            Assert.error("annotationTargetType(): unrecognized Attribute name " + e.value.name +
-                    " (" + e.value.name.getClass() + ")");
-            return AnnotationType.DECLARATION;
+            return AnnotationType.NONE;
         }
         return AnnotationType.NONE;
     }
@@ -1394,15 +1392,6 @@ public class TypeAnnotations {
         }
 
 
-        @Override
-        public void visitErroneous(JCErroneous tree) {
-            if (tree.errs != null) {
-                for (List<? extends JCTree> l = tree.errs; l.nonEmpty(); l = l.tail) {
-                    super.scan(l.head);
-                }
-            }
-        }
-        
         private void findTypeCompoundPosition(JCTree tree, JCTree frame, List<Attribute.TypeCompound> annotations) {
             if (!annotations.isEmpty()) {
                 final TypeAnnotationPosition p =
