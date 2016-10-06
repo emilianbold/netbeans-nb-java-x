@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -82,9 +82,6 @@ public class Check {
     private final Types types;
     private final TypeAnnotations typeAnnotations;
     private final JCDiagnostic.Factory diags;
-    private boolean warnOnSyntheticConflicts;
-    private boolean suppressAbortOnBadClassFile;
-    private boolean enableSunApiLintControl;
     private final JavaFileManager fileManager;
     private final Source source;
     private final Profile profile;
@@ -132,10 +129,6 @@ public class Check {
         allowStrictMethodClashCheck = source.allowStrictMethodClashCheck();
         allowPrivateSafeVarargs = source.allowPrivateSafeVarargs();
         allowDiamondWithAnonymousClassCreation = source.allowDiamondWithAnonymousClassCreation();
-        complexInference = options.isSet("complexinference");
-        warnOnSyntheticConflicts = options.isSet("warnOnSyntheticConflicts");
-        suppressAbortOnBadClassFile = options.isSet("suppressAbortOnBadClassFile");
-        enableSunApiLintControl = options.isSet("enableSunApiLintControl");
         warnOnAccessToSensitiveMembers = options.isSet("warnOnAccessToSensitiveMembers");
 
         Target target = Target.instance(context);
@@ -145,14 +138,13 @@ public class Check {
 
         boolean verboseDeprecated = lint.isEnabled(LintCategory.DEPRECATION);
         boolean verboseUnchecked = lint.isEnabled(LintCategory.UNCHECKED);
-        boolean verboseSunApi = lint.isEnabled(LintCategory.SUNAPI);
         boolean enforceMandatoryWarnings = true;
 
         deprecationHandler = new MandatoryWarningHandler(log, verboseDeprecated,
                 enforceMandatoryWarnings, "deprecated", LintCategory.DEPRECATION);
         uncheckedHandler = new MandatoryWarningHandler(log, verboseUnchecked,
                 enforceMandatoryWarnings, "unchecked", LintCategory.UNCHECKED);
-        sunApiHandler = new MandatoryWarningHandler(log, verboseSunApi,
+        sunApiHandler = new MandatoryWarningHandler(log, false,
                 enforceMandatoryWarnings, "sunapi", null);
 
         deferredLintHandler = DeferredLintHandler.instance(context);
@@ -178,18 +170,14 @@ public class Check {
      */
     boolean allowDiamondWithAnonymousClassCreation;
 
-    /** Switch: -complexinference option set?
-     */
-    boolean complexInference;
-
     /** Character for synthetic names
      */
     char syntheticNameChar;
 
-    /** A table mapping flat names of all compiled classes in this run to their
-     *  symbols; maintained from outside.
+    /** A table mapping flat names of all compiled classes for each module in this run
+     *  to their symbols; maintained from outside.
      */
-    public Map<Name,ClassSymbol> compiled = new HashMap<>();
+    private Map<Pair<ModuleSymbol, Name>,ClassSymbol> compiled = new HashMap<>();
 
     /** A handler for messages about deprecated usage.
      */
@@ -249,15 +237,6 @@ public class Check {
             log.warning(LintCategory.VARARGS, pos, key, args);
     }
 
-    /** Warn about using proprietary API.
-     *  @param pos        Position to be used for error reporting.
-     *  @param msg        A string describing the problem.
-     */
-    public void warnSunApi(DiagnosticPosition pos, String msg, Object... args) {
-        if (!lint.isSuppressed(LintCategory.SUNAPI))
-            sunApiHandler.report(pos, msg, args);
-    }
-
     public void warnStatic(DiagnosticPosition pos, String msg, Object... args) {
         if (lint.isEnabled(LintCategory.STATIC))
             log.warning(LintCategory.STATIC, pos, msg, args);
@@ -287,8 +266,7 @@ public class Check {
      */
     public Type completionError(DiagnosticPosition pos, CompletionFailure ex) {
         log.error(JCDiagnostic.DiagnosticFlag.NON_DEFERRABLE, pos, "cant.access", ex.sym, ex.getDetailValue());
-        if (ex instanceof ClassFinder.BadClassFile
-                && !suppressAbortOnBadClassFile) throw new Abort();
+        if (ex instanceof ClassFinder.BadClassFile) throw new Abort();
         else return syms.errType;
     }
 
@@ -428,7 +406,7 @@ public class Check {
         for (int i = (index == null) ? 1 : index; ; i++) {
             Name flatname = names.fromString(enclFlatnameStr
                     + syntheticNameChar + i + c.name);
-            if (compiled.get(flatname) == null) {
+            if (getCompiled(c.packge().modle, flatname) == null) {
                 localClassNameIndexes.put(key, i + 1);
                 return flatname;
             }
@@ -451,6 +429,22 @@ public class Check {
     public void newRound() {
         compiled.clear();
         localClassNameIndexes.clear();
+    }
+
+    public void putCompiled(ClassSymbol csym) {
+        compiled.put(Pair.of(csym.packge().modle, csym.flatname), csym);
+    }
+
+    public ClassSymbol getCompiled(ClassSymbol csym) {
+        return compiled.get(Pair.of(csym.packge().modle, csym.flatname));
+    }
+
+    public ClassSymbol getCompiled(ModuleSymbol msym, Name flatname) {
+        return compiled.get(Pair.of(msym, flatname));
+    }
+
+    public void removeCompiled(ClassSymbol csym) {
+        compiled.remove(Pair.of(csym.packge().modle, csym.flatname));
     }
 
 /* *************************************************************************
@@ -805,23 +799,25 @@ public class Check {
         if (!TreeInfo.isDiamond(tree) ||
                 t.isErroneous()) {
             return checkClassType(tree.clazz.pos(), t, true);
-        } else if (tree.def != null && !allowDiamondWithAnonymousClassCreation) {
-            log.error(tree.clazz.pos(),
-                    Errors.CantApplyDiamond1(t, Fragments.DiamondAndAnonClassNotSupportedInSource(source.name)));
-            return types.createErrorType(t);
-        } else if (t.tsym.type.getTypeArguments().isEmpty()) {
-            log.error(tree.clazz.pos(),
-                "cant.apply.diamond.1",
-                t, diags.fragment("diamond.non.generic", t));
-            return types.createErrorType(t);
-        } else if (tree.typeargs != null &&
-                tree.typeargs.nonEmpty()) {
-            log.error(tree.clazz.pos(),
-                "cant.apply.diamond.1",
-                t, diags.fragment("diamond.and.explicit.params", t));
-            return types.createErrorType(t);
         } else {
-            return t;
+            if (tree.def != null && !allowDiamondWithAnonymousClassCreation) {
+                log.error(DiagnosticFlag.SOURCE_LEVEL, tree.clazz.pos(),
+                        Errors.CantApplyDiamond1(t, Fragments.DiamondAndAnonClassNotSupportedInSource(source.name)));
+            }
+            if (t.tsym.type.getTypeArguments().isEmpty()) {
+                log.error(tree.clazz.pos(),
+                    "cant.apply.diamond.1",
+                    t, diags.fragment("diamond.non.generic", t));
+                return types.createErrorType(t);
+            } else if (tree.typeargs != null &&
+                    tree.typeargs.nonEmpty()) {
+                log.error(tree.clazz.pos(),
+                    "cant.apply.diamond.1",
+                    t, diags.fragment("diamond.and.explicit.params", t));
+                return types.createErrorType(t);
+            } else {
+                return t;
+            }
         }
     }
 
@@ -1172,10 +1168,6 @@ public class Check {
         case ERR:
             if (sym.isLocal()) {
                 mask = LocalClassFlags;
-                if (sym.name.isEmpty()) { // Anonymous class
-                    // JLS: Anonymous classes are final.
-                    implicit |= FINAL;
-                }
                 if ((sym.owner.flags_field & STATIC) == 0 &&
                     (flags & ENUM) != 0)
                     log.error(pos, "enums.must.be.static");
@@ -2069,10 +2061,11 @@ public class Check {
             }
         }
 
+        final boolean explicitOverride = m.attribute(syms.overrideType.tsym) != null;
         // Check if this method must override a super method due to being annotated with @Override
         // or by virtue of being a member of a diamond inferred anonymous class. Latter case is to
         // be treated "as if as they were annotated" with @Override.
-        boolean mustOverride = m.attribute(syms.overrideType.tsym) != null ||
+        boolean mustOverride = explicitOverride ||
                 (env.info.isAnonymousDiamond && !m.isConstructor() && !m.isPrivate());
         if (mustOverride && !isOverrider(m)) {
             DiagnosticPosition pos = tree.pos();
@@ -2082,7 +2075,9 @@ public class Check {
                     break;
                 }
             }
-            log.error(pos, "method.does.not.override.superclass");
+            log.error(pos,
+                      explicitOverride ? Errors.MethodDoesNotOverrideSuperclass :
+                                Errors.AnonymousDiamondMethodDoesNotOverrideSuperclass(Fragments.DiamondAnonymousMethodsImplicitlyOverride));
         }
     }
 
@@ -2716,12 +2711,7 @@ public class Check {
      */
     private void syntheticError(DiagnosticPosition pos, Symbol sym) {
         if (!sym.type.isErroneous()) {
-            if (warnOnSyntheticConflicts) {
-                log.warning(pos, "synthetic.name.conflict", sym, sym.location());
-            }
-            else {
-                log.error(pos, "synthetic.name.conflict", sym, sym.location());
-            }
+            log.error(pos, "synthetic.name.conflict", sym, sym.location());
         }
     }
 
@@ -3276,6 +3266,21 @@ public class Check {
             log.warning(LintCategory.DEP_ANN,
                     pos, "missing.deprecated.annotation");
         }
+        // Note: @Deprecated has no effect on local variables, parameters and package decls.
+        if (lint.isEnabled(LintCategory.DEPRECATION)) {
+            if (!syms.deprecatedType.isErroneous() && s.attribute(syms.deprecatedType.tsym) != null) {
+                switch (s.getKind()) {
+                    case LOCAL_VARIABLE:
+                    case PACKAGE:
+                    case PARAMETER:
+                    case RESOURCE_VARIABLE:
+                    case EXCEPTION_PARAMETER:
+                        log.warning(LintCategory.DEPRECATION, pos,
+                                "deprecated.annotation.has.no.effect", Kinds.kindName(s));
+                        break;
+                }
+            }
+        }
     }
 
     void checkDeprecated(final DiagnosticPosition pos, final Symbol other, final Symbol s) {
@@ -3293,13 +3298,8 @@ public class Check {
 
     void checkSunAPI(final DiagnosticPosition pos, final Symbol s) {
         if ((s.flags() & PROPRIETARY) != 0) {
-            deferredLintHandler.report(new DeferredLintHandler.LintLogger() {
-                public void report() {
-                    if (enableSunApiLintControl)
-                      warnSunApi(pos, "sun.proprietary", s);
-                    else
-                      log.mandatoryWarning(pos, "sun.proprietary", s);
-                }
+            deferredLintHandler.report(() -> {
+                log.mandatoryWarning(pos, "sun.proprietary", s);
             });
         }
     }
@@ -3571,7 +3571,7 @@ public class Check {
         private boolean isCanonical(JCTree tree) {
             while (tree.hasTag(SELECT)) {
                 JCFieldAccess s = (JCFieldAccess) tree;
-                if (s.sym.owner != TreeInfo.symbol(s.selected))
+                if (s.sym.owner.name != TreeInfo.symbol(s.selected).name)
                     return false;
                 tree = s.selected;
             }
@@ -3674,9 +3674,20 @@ public class Check {
 
     // Check that packages imported are in scope (JLS 7.4.3, 6.3, 6.5.3.1, 6.5.3.2)
     public void checkImportedPackagesObservable(final JCCompilationUnit toplevel) {
-        for (JCImport imp : toplevel.getImports()) {
-            if (!imp.staticImport && TreeInfo.name(imp.qualid) == names.asterisk) {
+        OUTER: for (JCImport imp : toplevel.getImports()) {
+            if (!imp.staticImport && TreeInfo.name(imp.qualid) == names.asterisk
+                    && ((JCFieldAccess)imp.qualid).selected.type != null) {
                 TypeSymbol tsym = ((JCFieldAccess)imp.qualid).selected.type.tsym;
+                if (toplevel.modle.visiblePackages != null) {
+                    //TODO - unclear: selects like javax.* will get resolved from the current module
+                    //(as javax is not an exported package from any module). And as javax in the current
+                    //module typically does not contain any classes or subpackages, we need to go through
+                    //the visible packages to find a sub-package:
+                    for (PackageSymbol known : toplevel.modle.visiblePackages.values()) {
+                        if (Convert.packagePart(known.fullname) == tsym.flatName())
+                            continue OUTER;
+                    }
+                }
                 if (tsym.kind == PCK && tsym.members().isEmpty() && !tsym.exists()) {
                     log.error(DiagnosticFlag.RESOLVE_ERROR, imp.pos, "doesnt.exist", tsym);
                 }

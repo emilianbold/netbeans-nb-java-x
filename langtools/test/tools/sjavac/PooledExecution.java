@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,17 @@
  * @test
  * @bug 8044131
  * @summary Makes sure sjavac poolsize option is honored.
- * @modules jdk.compiler/com.sun.tools.sjavac.comp
+ * @modules jdk.compiler/com.sun.tools.javac.main
+ *          jdk.compiler/com.sun.tools.sjavac.comp
  *          jdk.compiler/com.sun.tools.sjavac.server
  * @build Wrapper
  * @run main Wrapper PooledExecution
  */
-import java.io.Writer;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.sun.tools.javac.main.Main.Result;
 import com.sun.tools.sjavac.comp.PooledSjavac;
 import com.sun.tools.sjavac.server.Sjavac;
 
@@ -67,7 +69,7 @@ public class PooledExecution {
             for (int i = 0; i < NUM_REQUESTS; i++) {
                 tasks[i] = new Thread() {
                     public void run() {
-                        service.compile(new String[0], null, null);
+                        service.compile(new String[0]);
                         tasksFinished.incrementAndGet();
                     }
                 };
@@ -109,7 +111,7 @@ public class PooledExecution {
             AtomicInteger activeRequests = new AtomicInteger(0);
 
             @Override
-            public int compile(String[] args, Writer out, Writer err) {
+            public Result compile(String[] args) {
                 leftToStart.countDown();
                 int numActiveRequests = activeRequests.incrementAndGet();
                 System.out.printf("Left to start: %2d / Currently active: %2d%n",
@@ -123,7 +125,7 @@ public class PooledExecution {
                 }
                 activeRequests.decrementAndGet();
                 System.out.println("Task completed");
-                return 0;
+                return Result.OK;
             }
 
             @Override

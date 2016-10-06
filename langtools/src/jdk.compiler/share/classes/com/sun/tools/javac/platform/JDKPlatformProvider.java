@@ -22,6 +22,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
 package com.sun.tools.javac.platform;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.ProviderNotFoundException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -85,7 +87,7 @@ public class JDKPlatformProvider implements PlatformProvider {
                         }
                     }
                 }
-            } catch (IOException ex) {
+            } catch (IOException | ProviderNotFoundException ex) {
             }
         }
         SUPPORTED_JAVA_PLATFORM_VERSIONS.add(targetNumericVersion(Target.DEFAULT));

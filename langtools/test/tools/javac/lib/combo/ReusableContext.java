@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,7 @@ import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Check;
 import com.sun.tools.javac.comp.CompileStates;
 import com.sun.tools.javac.comp.Enter;
+import com.sun.tools.javac.comp.Modules;
 import com.sun.tools.javac.main.Arguments;
 import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -82,6 +83,7 @@ class ReusableContext extends Context implements TaskListener {
         drop(Arguments.argsKey);
         drop(DiagnosticListener.class);
         drop(Log.outKey);
+        drop(Log.errKey);
         drop(JavaFileManager.class);
         drop(JavacTask.class);
 
@@ -92,6 +94,7 @@ class ReusableContext extends Context implements TaskListener {
             ((ReusableJavaCompiler)ReusableJavaCompiler.instance(this)).clear();
             Types.instance(this).newRound();
             Check.instance(this).newRound();
+            Modules.instance(this).newRound();
             CompileStates.instance(this).clear();
             MultiTaskListener.instance(this).clear();
 
@@ -112,7 +115,7 @@ class ReusableContext extends Context implements TaskListener {
         public Void visitClass(ClassTree node, Symtab syms) {
             Symbol sym = ((JCClassDecl)node).sym;
             if (sym != null) {
-                syms.classes.remove(sym.flatName());
+                syms.removeClass(sym.packge().modle, sym.flatName());
                 Type sup = supertype(sym);
                 if (isCoreClass(sym) ||
                         (sup != null && isCoreClass(sup.tsym) && sup.tsym.kind != Kinds.Kind.TYP)) {

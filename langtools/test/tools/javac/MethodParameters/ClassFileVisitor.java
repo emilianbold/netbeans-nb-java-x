@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,9 +52,9 @@ import com.sun.tools.classfile.*;
  * rule is checked: <i>param[n] == ++param[n-1].charAt(0) + param[n-1]</i>
  * </ul>
  */
-class ClassFileVisitor extends Tester.Visitor {
+class ClassFileVisitor extends MethodParametersTester.Visitor {
 
-    Tester tester;
+    MethodParametersTester tester;
 
     public String cname;
     public boolean isEnum;
@@ -66,7 +66,7 @@ class ClassFileVisitor extends Tester.Visitor {
     public ClassFile classFile;
 
 
-    public ClassFileVisitor(Tester tester) {
+    public ClassFileVisitor(MethodParametersTester tester) {
         super(tester);
     }
 
@@ -279,7 +279,7 @@ class ClassFileVisitor extends Tester.Visitor {
                     userParam = param;
                 }
                 }
-                if (expect != null && !param.equals(expect)) {
+                if (check > 0 && expect != null && !param.equals(expect)) {
                     error(prefix + "param[" + x + "]='"
                           + param + "' expected '" + expect + "'");
                     return null;
@@ -343,6 +343,17 @@ class ClassFileVisitor extends Tester.Visitor {
                         }
                         if (isFinal) {
                             expect = "final this\\$[0-9]+";
+                        }
+                    }
+                }
+
+                if (synthetic && !mandated && !allowSynthetic) {
+                    //patch treatment for local captures
+                    if (isAnon || (isInner & !isStatic)) {
+                        expect = "val\\$.*";
+                        allowSynthetic = true;
+                        if (isFinal) {
+                            expect = "final val\\$.*";
                         }
                     }
                 }
@@ -411,7 +422,6 @@ class ClassFileVisitor extends Tester.Visitor {
             if (mSynthetic) {
                 return 0;
             }
-
             // Otherwise, do check test parameter naming convention.
             return 1;
         }

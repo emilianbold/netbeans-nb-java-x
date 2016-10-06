@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package jdk.jshell;
 
 import jdk.jshell.SourceCodeAnalysis.Completeness;
 import com.sun.source.tree.AssignmentTree;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ErroneousTree;
 import com.sun.source.tree.ExpressionTree;
@@ -39,19 +40,21 @@ import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Scope;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.Tree.Kind;
+import com.sun.source.tree.TypeParameterTree;
 import com.sun.source.tree.VariableTree;
+import com.sun.source.util.JavacTask;
 import com.sun.source.util.SourcePositions;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
+import com.sun.source.util.Trees;
 import com.sun.tools.javac.api.JavacScope;
+import com.sun.tools.javac.api.JavacTaskImpl;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ClassType;
-import com.sun.tools.javac.util.DefinedBy;
-import com.sun.tools.javac.util.DefinedBy.Api;
 import com.sun.tools.javac.util.Name;
 import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Pair;
@@ -79,19 +82,29 @@ import java.net.URI;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import static java.util.stream.Collectors.collectingAndThen;
-import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
@@ -99,6 +112,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import javax.lang.model.SourceVersion;
+
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.QualifiedNameable;
@@ -108,32 +122,60 @@ import javax.lang.model.type.ExecutableType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Types;
+import javax.tools.JavaCompiler;
 import javax.tools.JavaFileManager.Location;
+import javax.tools.JavaFileObject;
+import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
+import javax.tools.ToolProvider;
 
 import static jdk.jshell.Util.REPL_DOESNOTMATTER_CLASS_NAME;
+import static java.util.stream.Collectors.joining;
+import static jdk.jshell.SourceCodeAnalysis.Completeness.DEFINITELY_INCOMPLETE;
 
 /**
  * The concrete implementation of SourceCodeAnalysis.
  * @author Robert Field
  */
 class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
+
+    private static final Map<Path, ClassIndex> PATH_TO_INDEX = new HashMap<>();
+    private static final ExecutorService INDEXER = Executors.newFixedThreadPool(1, r -> {
+        Thread t = new Thread(r);
+        t.setDaemon(true);
+        t.setUncaughtExceptionHandler((thread, ex) -> ex.printStackTrace());
+        return t;
+    });
+
     private final JShell proc;
     private final CompletenessAnalyzer ca;
+    private final Map<Path, ClassIndex> currentIndexes = new HashMap<>();
+    private int indexVersion;
+    private int classpathVersion;
+    private final Object suspendLock = new Object();
+    private int suspend;
 
     SourceCodeAnalysisImpl(JShell proc) {
         this.proc = proc;
         this.ca = new CompletenessAnalyzer(proc);
+
+        int cpVersion = classpathVersion = 1;
+
+        INDEXER.submit(() -> refreshIndexes(cpVersion));
     }
 
     @Override
     public CompletionInfo analyzeCompletion(String srcInput) {
         MaskCommentsAndModifiers mcm = new MaskCommentsAndModifiers(srcInput, false);
+        if (mcm.endsWithOpenComment()) {
+            proc.debug(DBG_COMPA, "Incomplete (open comment): %s\n", srcInput);
+            return new CompletionInfoImpl(DEFINITELY_INCOMPLETE, null, srcInput + '\n');
+        }
         String cleared = mcm.cleared();
         String trimmedInput = Util.trimEnd(cleared);
         if (trimmedInput.isEmpty()) {
             // Just comment or empty
-            return new CompletionInfo(Completeness.EMPTY, srcInput.length(), srcInput, "");
+            return new CompletionInfoImpl(Completeness.EMPTY, srcInput, "");
         }
         CaInfo info = ca.scan(trimmedInput);
         Completeness status = info.status;
@@ -151,12 +193,12 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                             + mcm.mask().substring(nonCommentNonWhiteLength);
                     proc.debug(DBG_COMPA, "Complete: %s\n", compileSource);
                     proc.debug(DBG_COMPA, "   nothing remains.\n");
-                    return new CompletionInfo(status, unitEndPos, compileSource, "");
+                    return new CompletionInfoImpl(status, compileSource, "");
                 } else {
                     String remain = srcInput.substring(unitEndPos);
                     proc.debug(DBG_COMPA, "Complete: %s\n", src);
                     proc.debug(DBG_COMPA, "          remaining: %s\n", remain);
-                    return new CompletionInfo(status, unitEndPos, src, remain);
+                    return new CompletionInfoImpl(status, src, remain);
                 }
             case COMPLETE_WITH_SEMI:
                 // The unit is the whole non-coment/white input plus semicolon
@@ -165,26 +207,21 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                         + mcm.mask().substring(nonCommentNonWhiteLength);
                 proc.debug(DBG_COMPA, "Complete with semi: %s\n", compileSource);
                 proc.debug(DBG_COMPA, "   nothing remains.\n");
-                return new CompletionInfo(status, unitEndPos, compileSource, "");
+                return new CompletionInfoImpl(status, compileSource, "");
             case DEFINITELY_INCOMPLETE:
                 proc.debug(DBG_COMPA, "Incomplete: %s\n", srcInput);
-                return new CompletionInfo(status, unitEndPos, null, srcInput + '\n');
+                return new CompletionInfoImpl(status, null, srcInput + '\n');
             case CONSIDERED_INCOMPLETE:
                 proc.debug(DBG_COMPA, "Considered incomplete: %s\n", srcInput);
-                return new CompletionInfo(status, unitEndPos, null, srcInput + '\n');
+                return new CompletionInfoImpl(status, null, srcInput + '\n');
             case EMPTY:
                 proc.debug(DBG_COMPA, "Detected empty: %s\n", srcInput);
-                return new CompletionInfo(status, unitEndPos, srcInput, "");
+                return new CompletionInfoImpl(status, srcInput, "");
             case UNKNOWN:
                 proc.debug(DBG_COMPA, "Detected error: %s\n", srcInput);
-                return new CompletionInfo(status, unitEndPos, srcInput, "");
+                return new CompletionInfoImpl(status, srcInput, "");
         }
         throw new InternalError();
-    }
-
-    private OuterWrap wrapInClass(Wrap guts) {
-        String imports = proc.maps.packageAndImportsExcept(null, null);
-        return OuterWrap.wrapInClass(proc.maps.packageName(), REPL_DOESNOTMATTER_CLASS_NAME, imports, "", guts);
     }
 
     private Tree.Kind guessKind(String code) {
@@ -203,6 +240,15 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
 
     @Override
     public List<Suggestion> completionSuggestions(String code, int cursor, int[] anchor) {
+        suspendIndexing();
+        try {
+            return completionSuggestionsImpl(code, cursor, anchor);
+        } finally {
+            resumeIndexing();
+        }
+    }
+
+    private List<Suggestion> completionSuggestionsImpl(String code, int cursor, int[] anchor) {
         code = code.substring(0, cursor);
         Matcher m = JAVA_IDENTIFIER.matcher(code);
         String identifier = "";
@@ -220,26 +266,27 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         OuterWrap codeWrap;
         switch (guessKind(code)) {
             case IMPORT:
-                codeWrap = OuterWrap.wrapImport(null, Wrap.importWrap(code + "any.any"));
+                codeWrap = proc.outerMap.wrapImport(Wrap.simpleWrap(code + "any.any"), null);
                 break;
+            case CLASS:
             case METHOD:
-                codeWrap = wrapInClass(Wrap.classMemberWrap(code));
+                codeWrap = proc.outerMap.wrapInTrialClass(Wrap.classMemberWrap(code));
                 break;
             default:
-                codeWrap = wrapInClass(Wrap.methodWrap(code));
+                codeWrap = proc.outerMap.wrapInTrialClass(Wrap.methodWrap(code));
                 break;
         }
         String requiredPrefix = identifier;
         return computeSuggestions(codeWrap, cursor, anchor).stream()
-                .filter(s -> s.continuation.startsWith(requiredPrefix) && !s.continuation.equals(REPL_DOESNOTMATTER_CLASS_NAME))
-                .sorted(Comparator.comparing(s -> s.continuation))
+                .filter(s -> s.continuation().startsWith(requiredPrefix) && !s.continuation().equals(REPL_DOESNOTMATTER_CLASS_NAME))
+                .sorted(Comparator.comparing(s -> s.continuation()))
                 .collect(collectingAndThen(toList(), Collections::unmodifiableList));
     }
 
     private List<Suggestion> computeSuggestions(OuterWrap code, int cursor, int[] anchor) {
         AnalyzeTask at = proc.taskFactory.new AnalyzeTask(code);
         SourcePositions sp = at.trees().getSourcePositions();
-        CompilationUnitTree topLevel = at.cuTree();
+        CompilationUnitTree topLevel = at.firstCuTree();
         List<Suggestion> result = new ArrayList<>();
         TreePath tp = pathFor(topLevel, sp, code.snippetIndexToWrapIndex(cursor));
         if (tp != null) {
@@ -335,10 +382,46 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                         addElements(membersOf(at, at.getElements().getPackageElement("").asType(), false), it.isStatic() ? STATIC_ONLY.and(accessibility) : accessibility, smartFilter, result);
                     }
                     break;
-                case ERRONEOUS:
-                case EMPTY_STATEMENT: {
+                case CLASS: {
+                    Predicate<Element> accept = accessibility.and(IS_TYPE);
+                    addScopeElements(at, scope, IDENTITY, accept, smartFilter, result);
+                    addElements(primitivesOrVoid(at), TRUE, smartFilter, result);
+                    break;
+                }
+                case BLOCK:
+                case EMPTY_STATEMENT:
+                case ERRONEOUS: {
                     boolean staticOnly = ReplResolve.isStatic(((JavacScope)scope).getEnv());
                     Predicate<Element> accept = accessibility.and(staticOnly ? STATIC_ONLY : TRUE);
+                    if (isClass(tp)) {
+                        ClassTree clazz = (ClassTree) tp.getParentPath().getLeaf();
+                        if (clazz.getExtendsClause() == tp.getLeaf()) {
+                            accept = accept.and(IS_TYPE);
+                            smartFilter = smartFilter.and(el -> el.getKind() == ElementKind.CLASS);
+                        } else {
+                            Predicate<Element> f = smartFilterFromList(at, tp, clazz.getImplementsClause(), tp.getLeaf());
+                            if (f != null) {
+                                accept = accept.and(IS_TYPE);
+                                smartFilter = f.and(el -> el.getKind() == ElementKind.INTERFACE);
+                            }
+                        }
+                    } else if (isTypeParameter(tp)) {
+                        TypeParameterTree tpt = (TypeParameterTree) tp.getParentPath().getLeaf();
+                        Predicate<Element> f = smartFilterFromList(at, tp, tpt.getBounds(), tp.getLeaf());
+                        if (f != null) {
+                            accept = accept.and(IS_TYPE);
+                            smartFilter = f;
+                            if (!tpt.getBounds().isEmpty() && tpt.getBounds().get(0) != tp.getLeaf()) {
+                                smartFilter = smartFilter.and(el -> el.getKind() == ElementKind.INTERFACE);
+                            }
+                        }
+                    } else if (isVariable(tp)) {
+                        VariableTree var = (VariableTree) tp.getParentPath().getLeaf();
+                        if (var.getType() == tp.getLeaf()) {
+                            accept = accept.and(IS_TYPE);
+                        }
+                    }
+
                     addScopeElements(at, scope, IDENTITY, accept, smartFilter, result);
 
                     Tree parent = tp.getParentPath().getLeaf();
@@ -368,6 +451,72 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         return result;
     }
 
+    private static final Set<Kind> CLASS_KINDS = EnumSet.of(
+            Kind.ANNOTATION_TYPE, Kind.CLASS, Kind.ENUM, Kind.INTERFACE
+    );
+
+    private Predicate<Element> smartFilterFromList(AnalyzeTask at, TreePath base, Collection<? extends Tree> types, Tree current) {
+        Set<Element> existingEls = new HashSet<>();
+
+        for (Tree type : types) {
+            if (type == current) {
+                return el -> !existingEls.contains(el);
+            }
+            existingEls.add(at.trees().getElement(new TreePath(base, type)));
+        }
+
+        return null;
+    }
+
+    @Override
+    public SnippetWrapper wrapper(Snippet snippet) {
+        return new SnippetWrapper() {
+            @Override
+            public String source() {
+                return snippet.source();
+            }
+
+            @Override
+            public String wrapped() {
+                return snippet.outerWrap().wrapped();
+            }
+
+            @Override
+            public String fullClassName() {
+                return snippet.classFullName();
+            }
+
+            @Override
+            public Snippet.Kind kind() {
+                return snippet.kind() == Snippet.Kind.ERRONEOUS
+                        ? ((ErroneousSnippet) snippet).probableKind()
+                        : snippet.kind();
+            }
+
+            @Override
+            public int sourceToWrappedPosition(int pos) {
+                return snippet.outerWrap().snippetIndexToWrapIndex(pos);
+            }
+
+            @Override
+            public int wrappedToSourcePosition(int pos) {
+                return snippet.outerWrap().wrapIndexToSnippetIndex(pos);
+            }
+        };
+    }
+
+    @Override
+    public List<SnippetWrapper> wrappers(String input) {
+        return proc.eval.sourceToSnippetsWithWrappers(input).stream()
+                .map(sn -> wrapper(sn))
+                .collect(toList());
+    }
+
+    @Override
+    public Collection<Snippet> dependents(Snippet snippet) {
+        return proc.maps.getDependents(snippet);
+    }
+
     private boolean isStaticContext(AnalyzeTask at, TreePath path) {
         switch (path.getLeaf().getKind()) {
             case ARRAY_TYPE:
@@ -383,22 +532,25 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         TreePath[] deepest = new TreePath[1];
 
         new TreePathScanner<Void, Void>() {
-            @Override @DefinedBy(Api.COMPILER_TREE)
+            @Override
             public Void scan(Tree tree, Void p) {
                 if (tree == null)
                     return null;
 
                 long start = sp.getStartPosition(topLevel, tree);
                 long end = sp.getEndPosition(topLevel, tree);
+                long prevEnd = deepest[0] != null ? sp.getEndPosition(topLevel, deepest[0].getLeaf()) : -1;
 
-                if (start <= pos && pos <= end) {
+                if (start <= pos && pos <= end &&
+                    (start != end || prevEnd != end || deepest[0] == null ||
+                     deepest[0].getParentPath().getLeaf() != getCurrentPath().getLeaf())) {
                     deepest[0] = new TreePath(getCurrentPath(), tree);
                     return super.scan(tree, p);
                 }
 
                 return null;
             }
-            @Override @DefinedBy(Api.COMPILER_TREE)
+            @Override
             public Void visitErroneous(ErroneousTree node, Void p) {
                 return scan(node.getErrorTrees(), null);
             }
@@ -417,6 +569,21 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         Tree parent = tp.getParentPath().getLeaf();
         return parent.getKind() == Kind.METHOD &&
                 ((MethodTree)parent).getThrows().contains(tp.getLeaf());
+    }
+
+    private boolean isClass(TreePath tp) {
+        return tp.getParentPath() != null &&
+               CLASS_KINDS.contains(tp.getParentPath().getLeaf().getKind());
+    }
+
+    private boolean isTypeParameter(TreePath tp) {
+        return tp.getParentPath() != null &&
+               tp.getParentPath().getLeaf().getKind() == Kind.TYPE_PARAMETER;
+    }
+
+    private boolean isVariable(TreePath tp) {
+        return tp.getParentPath() != null &&
+               tp.getParentPath().getLeaf().getKind() == Kind.VARIABLE;
     }
 
     private ImportTree findImport(TreePath tp) {
@@ -453,6 +620,7 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
     private final Predicate<Element> IS_PACKAGE = el -> el.getKind() == ElementKind.PACKAGE;
     private final Predicate<Element> IS_CLASS = el -> el.getKind().isClass();
     private final Predicate<Element> IS_INTERFACE = el -> el.getKind().isInterface();
+    private final Predicate<Element> IS_TYPE = IS_CLASS.or(IS_INTERFACE).or(el -> el.getKind() == ElementKind.TYPE_PARAMETER);
     private final Predicate<Element> IS_VOID = el -> el.asType().getKind() == TypeKind.VOID;
     private final Predicate<Element> STATIC_ONLY = el -> {
         ElementKind kind = el.getKind();
@@ -486,11 +654,16 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         for (Element c : elements) {
             if (!accept.test(c))
                 continue;
+            if (c.getKind() == ElementKind.METHOD &&
+                c.getSimpleName().contentEquals(Util.DOIT_METHOD_NAME) &&
+                ((ExecutableElement) c).getParameters().isEmpty()) {
+                continue;
+            }
             String simpleName = simpleName(c);
             if (c.getKind() == ElementKind.CONSTRUCTOR || c.getKind() == ElementKind.METHOD) {
                 simpleName += paren.apply(hasParams.contains(simpleName));
             }
-            result.add(new Suggestion(simpleName, smart.test(c)));
+            result.add(new SuggestionImpl(simpleName, smart.test(c)));
         }
     }
 
@@ -589,113 +762,36 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                 .collect(toList());
     }
 
-    private Set<String> emptyContextPackages = null;
-
     void classpathChanged() {
-        emptyContextPackages = null;
+        synchronized (currentIndexes) {
+            int cpVersion = ++classpathVersion;
+
+            INDEXER.submit(() -> refreshIndexes(cpVersion));
+        }
     }
 
     private Set<PackageElement> listPackages(AnalyzeTask at, String enclosingPackage) {
-        Set<String> packs;
-
-        if (enclosingPackage.isEmpty() && emptyContextPackages != null) {
-            packs = emptyContextPackages;
-        } else {
-            packs = new HashSet<>();
-
-            listPackages(StandardLocation.PLATFORM_CLASS_PATH, enclosingPackage, packs);
-            listPackages(StandardLocation.CLASS_PATH, enclosingPackage, packs);
-            listPackages(StandardLocation.SOURCE_PATH, enclosingPackage, packs);
-
-            if (enclosingPackage.isEmpty()) {
-                emptyContextPackages = packs;
-            }
+        synchronized (currentIndexes) {
+            return currentIndexes.values()
+                                 .stream()
+                                 .flatMap(idx -> idx.packages.stream())
+                                 .filter(p -> enclosingPackage.isEmpty() || p.startsWith(enclosingPackage + "."))
+                                 .map(p -> {
+                                     int dot = p.indexOf('.', enclosingPackage.length() + 1);
+                                     return dot == (-1) ? p : p.substring(0, dot);
+                                 })
+                                 .distinct()
+                                 .map(p -> createPackageElement(at, p))
+                                 .collect(Collectors.toSet());
         }
-
-        return packs.stream()
-                    .map(pkg -> createPackageElement(at, pkg))
-                    .collect(Collectors.toSet());
     }
 
     private PackageElement createPackageElement(AnalyzeTask at, String packageName) {
         Names names = Names.instance(at.getContext());
         Symtab syms = Symtab.instance(at.getContext());
-        PackageElement existing = syms.enterPackage(names.fromString(packageName));
+        PackageElement existing = syms.enterPackage(syms.unnamedModule, names.fromString(packageName));
 
         return existing;
-    }
-
-    private void listPackages(Location loc, String enclosing, Set<String> packs) {
-        Iterable<? extends Path> paths = proc.taskFactory.fileManager().getLocationAsPaths(loc);
-
-        if (paths == null)
-            return ;
-
-        for (Path p : paths) {
-            listPackages(p, enclosing, packs);
-        }
-    }
-
-    private void listPackages(Path path, String enclosing, Set<String> packages) {
-        try {
-            if (path.equals(Paths.get("JRT_MARKER_FILE"))) {
-                FileSystem jrtfs = FileSystems.getFileSystem(URI.create("jrt:/"));
-                Path modules = jrtfs.getPath("modules");
-                try (DirectoryStream<Path> stream = Files.newDirectoryStream(modules)) {
-                    for (Path c : stream) {
-                        listDirectory(c, enclosing, packages);
-                    }
-                }
-            } else if (!Files.isDirectory(path)) {
-                if (Files.exists(path)) {
-                    ClassLoader cl = SourceCodeAnalysisImpl.class.getClassLoader();
-
-                    try (FileSystem zip = FileSystems.newFileSystem(path, cl)) {
-                        listDirectory(zip.getRootDirectories().iterator().next(), enclosing, packages);
-                    }
-                }
-            } else {
-                listDirectory(path, enclosing, packages);
-            }
-        } catch (IOException ex) {
-            proc.debug(ex, "SourceCodeAnalysisImpl.listPackages(" + path.toString() + ", " + enclosing + ", " + packages + ")");
-        }
-    }
-
-    private void listDirectory(Path path, String enclosing, Set<String> packages) throws IOException {
-        String separator = path.getFileSystem().getSeparator();
-        Path resolved = path.resolve(enclosing.replace(".", separator));
-
-        if (Files.isDirectory(resolved)) {
-            try (DirectoryStream<Path> ds = Files.newDirectoryStream(resolved)) {
-                for (Path entry : ds) {
-                    String name = pathName(entry);
-
-                    if (SourceVersion.isIdentifier(name) &&
-                        Files.isDirectory(entry) &&
-                        validPackageCandidate(entry)) {
-                        packages.add(enclosing + (enclosing.isEmpty() ? "" : ".") + name);
-                    }
-                }
-            }
-        }
-    }
-
-    private boolean validPackageCandidate(Path p) throws IOException {
-        try (Stream<Path> dir = Files.list(p)) {
-            return dir.anyMatch(e -> Files.isDirectory(e) && SourceVersion.isIdentifier(pathName(e)) ||
-                                e.getFileName().toString().endsWith(".class"));
-        }
-    }
-
-    private String pathName(Path p) {
-        String separator = p.getFileSystem().getSeparator();
-        String name = p.getFileName().toString();
-
-        if (name.endsWith(separator)) //jars have '/' appended
-            name = name.substring(0, name.length() - separator.length());
-
-        return name;
     }
 
     private Element createArrayLengthSymbol(AnalyzeTask at, TypeMirror site) {
@@ -734,11 +830,23 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         };
         @SuppressWarnings("unchecked")
         List<Element> result = Util.stream(scopeIterable)
-                             .flatMap(s -> Util.stream((Iterable<Element>)s.getLocalElements()))
+                             .flatMap(s -> localElements(s))
                              .flatMap(el -> Util.stream((Iterable<Element>)elementConvertor.apply(el)))
                              .collect(toCollection(ArrayList :: new));
         result.addAll(listPackages(at, ""));
         return result;
+    }
+
+    private Stream<Element> localElements(Scope scope) {
+        @SuppressWarnings("unchecked")
+        Stream<Element> elements = Util.stream((Iterable<Element>)scope.getLocalElements());
+
+        if (scope.getEnclosingScope() != null &&
+            scope.getEnclosingClass() != scope.getEnclosingScope().getEnclosingClass()) {
+            elements = Stream.concat(elements, scope.getEnclosingClass().getEnclosedElements().stream());
+        }
+
+        return elements;
     }
 
     @SuppressWarnings("fallthrough")
@@ -965,6 +1073,21 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
 
     @Override
     public String documentation(String code, int cursor) {
+        suspendIndexing();
+        try {
+            return documentationImpl(code, cursor);
+        } finally {
+            resumeIndexing();
+        }
+    }
+
+    //tweaked by tests to disable reading parameter names from classfiles so that tests using
+    //JDK's classes are stable for both release and fastdebug builds:
+    private final String[] keepParameterNames = new String[] {
+        "-parameters"
+    };
+
+    private String documentationImpl(String code, int cursor) {
         code = code.substring(0, cursor);
         if (code.trim().isEmpty()) { //TODO: comment handling
             code += ";";
@@ -973,10 +1096,10 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         if (guessKind(code) == Kind.IMPORT)
             return null;
 
-        OuterWrap codeWrap = wrapInClass(Wrap.methodWrap(code));
-        AnalyzeTask at = proc.taskFactory.new AnalyzeTask(codeWrap);
+        OuterWrap codeWrap = proc.outerMap.wrapInTrialClass(Wrap.methodWrap(code));
+        AnalyzeTask at = proc.taskFactory.new AnalyzeTask(codeWrap, keepParameterNames);
         SourcePositions sp = at.trees().getSourcePositions();
-        CompilationUnitTree topLevel = at.cuTree();
+        CompilationUnitTree topLevel = at.firstCuTree();
         TreePath tp = pathFor(topLevel, sp, codeWrap.snippetIndexToWrapIndex(cursor));
 
         if (tp == null)
@@ -1015,9 +1138,11 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                         .collect(Collectors.toList());
         }
 
-        return Util.stream(candidates)
-                .map(method -> Util.expunge(element2String(method.fst)))
-                .collect(joining("\n"));
+        try (SourceCache sourceCache = new SourceCache(at)) {
+            return Util.stream(candidates)
+                    .map(method -> Util.expunge(element2String(sourceCache, method.fst)))
+                    .collect(joining("\n"));
+        }
     }
 
     private boolean isEmptyArgumentsContext(List<? extends ExpressionTree> arguments) {
@@ -1028,19 +1153,178 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         return false;
     }
 
-    private String element2String(Element el) {
+    private String element2String(SourceCache sourceCache, Element el) {
+        try {
+            if (hasSyntheticParameterNames(el)) {
+                el = sourceCache.getSourceMethod(el);
+            }
+        } catch (IOException ex) {
+            proc.debug(ex, "SourceCodeAnalysisImpl.element2String(..., " + el + ")");
+        }
+
+        return Util.expunge(elementHeader(el));
+    }
+
+    private boolean hasSyntheticParameterNames(Element el) {
+        if (el.getKind() != ElementKind.CONSTRUCTOR && el.getKind() != ElementKind.METHOD)
+            return false;
+
+        ExecutableElement ee = (ExecutableElement) el;
+
+        if (ee.getParameters().isEmpty())
+            return false;
+
+        return ee.getParameters()
+                 .stream()
+                 .allMatch(param -> param.getSimpleName().toString().startsWith("arg"));
+    }
+
+    private final class SourceCache implements AutoCloseable {
+        private final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        private final Map<String, Map<String, Element>> topLevelName2Signature2Method = new HashMap<>();
+        private final AnalyzeTask originalTask;
+        private final StandardJavaFileManager fm;
+
+        public SourceCache(AnalyzeTask originalTask) {
+            this.originalTask = originalTask;
+            List<Path> sources = findSources();
+            if (sources.iterator().hasNext()) {
+                StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, null);
+                try {
+                    fm.setLocationFromPaths(StandardLocation.SOURCE_PATH, sources);
+                } catch (IOException ex) {
+                    proc.debug(ex, "SourceCodeAnalysisImpl.SourceCache.<init>(...)");
+                    try {
+                        fm.close();
+                    } catch (IOException closeEx) {
+                        proc.debug(closeEx, "SourceCodeAnalysisImpl.SourceCache.close()");
+                    }
+                    fm = null;
+                }
+                this.fm = fm;
+            } else {
+                //don't waste time if there are no sources
+                this.fm = null;
+            }
+        }
+
+        public Element getSourceMethod(Element method) throws IOException {
+            if (fm == null)
+                return method;
+
+            TypeElement type = topLevelType(method);
+
+            if (type == null)
+                return method;
+
+            String binaryName = originalTask.task.getElements().getBinaryName(type).toString();
+
+            Map<String, Element> cache = topLevelName2Signature2Method.get(binaryName);
+
+            if (cache == null) {
+                topLevelName2Signature2Method.put(binaryName, cache = createMethodCache(binaryName));
+            }
+
+            String handle = elementHeader(method, false);
+
+            return cache.getOrDefault(handle, method);
+        }
+
+        private TypeElement topLevelType(Element el) {
+            while (el != null && el.getEnclosingElement().getKind() != ElementKind.PACKAGE) {
+                el = el.getEnclosingElement();
+            }
+
+            return el != null && (el.getKind().isClass() || el.getKind().isInterface()) ? (TypeElement) el : null;
+        }
+
+        private Map<String, Element> createMethodCache(String binaryName) throws IOException {
+            Pair<JavacTask, CompilationUnitTree> source = findSource(binaryName);
+
+            if (source == null)
+                return Collections.emptyMap();
+
+            Map<String, Element> signature2Method = new HashMap<>();
+            Trees trees = Trees.instance(source.fst);
+
+            new TreePathScanner<Void, Void>() {
+                @Override
+                public Void visitMethod(MethodTree node, Void p) {
+                    Element currentMethod = trees.getElement(getCurrentPath());
+
+                    if (currentMethod != null) {
+                        signature2Method.put(elementHeader(currentMethod, false), currentMethod);
+                    }
+
+                    return null;
+                }
+            }.scan(source.snd, null);
+
+            return signature2Method;
+        }
+
+        private Pair<JavacTask, CompilationUnitTree> findSource(String binaryName) throws IOException {
+            JavaFileObject jfo = fm.getJavaFileForInput(StandardLocation.SOURCE_PATH,
+                                                        binaryName,
+                                                        JavaFileObject.Kind.SOURCE);
+
+            if (jfo == null)
+                return null;
+
+            List<JavaFileObject> jfos = Arrays.asList(jfo);
+            JavacTaskImpl task = (JavacTaskImpl) compiler.getTask(null, fm, d -> {}, null, null, jfos);
+            Iterable<? extends CompilationUnitTree> cuts = task.parse();
+
+            task.enter();
+
+            return Pair.of(task, cuts.iterator().next());
+        }
+
+        @Override
+        public void close() {
+            try {
+                if (fm != null) {
+                    fm.close();
+                }
+            } catch (IOException ex) {
+                proc.debug(ex, "SourceCodeAnalysisImpl.SourceCache.close()");
+            }
+        }
+    }
+
+    private List<Path> availableSources;
+
+    private List<Path> findSources() {
+        if (availableSources != null) {
+            return availableSources;
+        }
+        List<Path> result = new ArrayList<>();
+        Path home = Paths.get(System.getProperty("java.home"));
+        Path srcZip = home.resolve("src.zip");
+        if (!Files.isReadable(srcZip))
+            srcZip = home.getParent().resolve("src.zip");
+        if (Files.isReadable(srcZip))
+            result.add(srcZip);
+        return availableSources = result;
+    }
+
+    private String elementHeader(Element el) {
+        return elementHeader(el, true);
+    }
+
+    private String elementHeader(Element el, boolean includeParameterNames) {
         switch (el.getKind()) {
             case ANNOTATION_TYPE: case CLASS: case ENUM: case INTERFACE:
                 return ((TypeElement) el).getQualifiedName().toString();
             case FIELD:
-                return element2String(el.getEnclosingElement()) + "." + el.getSimpleName() + ":" + el.asType();
+                return elementHeader(el.getEnclosingElement()) + "." + el.getSimpleName() + ":" + el.asType();
             case ENUM_CONSTANT:
-                return element2String(el.getEnclosingElement()) + "." + el.getSimpleName();
+                return elementHeader(el.getEnclosingElement()) + "." + el.getSimpleName();
             case EXCEPTION_PARAMETER: case LOCAL_VARIABLE: case PARAMETER: case RESOURCE_VARIABLE:
                 return el.getSimpleName() + ":" + el.asType();
             case CONSTRUCTOR: case METHOD:
                 StringBuilder header = new StringBuilder();
-                header.append(element2String(el.getEnclosingElement()));
+                header.append(elementHeader(el.getEnclosingElement()));
                 if (el.getKind() == ElementKind.METHOD) {
                     header.append(".");
                     header.append(el.getSimpleName());
@@ -1058,8 +1342,10 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                     } else {
                         header.append(p.asType());
                     }
-                    header.append(" ");
-                    header.append(p.getSimpleName());
+                    if (includeParameterNames) {
+                        header.append(" ");
+                        header.append(p.getSimpleName());
+                    }
                     sep = ", ";
                 }
                 header.append(")");
@@ -1074,4 +1360,441 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         }
         return arrayType;
     }
+
+    @Override
+    public String analyzeType(String code, int cursor) {
+        code = code.substring(0, cursor);
+        CompletionInfo completionInfo = analyzeCompletion(code);
+        if (!completionInfo.completeness().isComplete())
+            return null;
+        if (completionInfo.completeness() == Completeness.COMPLETE_WITH_SEMI) {
+            code += ";";
+        }
+
+        OuterWrap codeWrap;
+        switch (guessKind(code)) {
+            case IMPORT: case METHOD: case CLASS: case ENUM:
+            case INTERFACE: case ANNOTATION_TYPE: case VARIABLE:
+                return null;
+            default:
+                codeWrap = proc.outerMap.wrapInTrialClass(Wrap.methodWrap(code));
+                break;
+        }
+        AnalyzeTask at = proc.taskFactory.new AnalyzeTask(codeWrap);
+        SourcePositions sp = at.trees().getSourcePositions();
+        CompilationUnitTree topLevel = at.firstCuTree();
+        int pos = codeWrap.snippetIndexToWrapIndex(code.length());
+        TreePath tp = pathFor(topLevel, sp, pos);
+        while (ExpressionTree.class.isAssignableFrom(tp.getParentPath().getLeaf().getKind().asInterface()) &&
+               tp.getParentPath().getLeaf().getKind() != Kind.ERRONEOUS &&
+               tp.getParentPath().getParentPath() != null)
+            tp = tp.getParentPath();
+        TypeMirror type = at.trees().getTypeMirror(tp);
+
+        if (type == null)
+            return null;
+
+        switch (type.getKind()) {
+            case ERROR: case NONE: case OTHER:
+            case PACKAGE: case VOID:
+                return null; //not usable
+            case NULL:
+                type = at.getElements().getTypeElement("java.lang.Object").asType();
+                break;
+        }
+
+        return TreeDissector.printType(at, proc, type);
+    }
+
+    @Override
+    public QualifiedNames listQualifiedNames(String code, int cursor) {
+        code = code.substring(0, cursor);
+        if (code.trim().isEmpty()) {
+            return new QualifiedNames(Collections.emptyList(), -1, true, false);
+        }
+        OuterWrap codeWrap;
+        switch (guessKind(code)) {
+            case IMPORT:
+                return new QualifiedNames(Collections.emptyList(), -1, true, false);
+            case METHOD:
+                codeWrap = proc.outerMap.wrapInTrialClass(Wrap.classMemberWrap(code));
+                break;
+            default:
+                codeWrap = proc.outerMap.wrapInTrialClass(Wrap.methodWrap(code));
+                break;
+        }
+        AnalyzeTask at = proc.taskFactory.new AnalyzeTask(codeWrap);
+        SourcePositions sp = at.trees().getSourcePositions();
+        CompilationUnitTree topLevel = at.firstCuTree();
+        TreePath tp = pathFor(topLevel, sp, codeWrap.snippetIndexToWrapIndex(code.length()));
+        if (tp.getLeaf().getKind() != Kind.IDENTIFIER) {
+            return new QualifiedNames(Collections.emptyList(), -1, true, false);
+        }
+        Scope scope = at.trees().getScope(tp);
+        TypeMirror type = at.trees().getTypeMirror(tp);
+        Element el = at.trees().getElement(tp);
+
+        boolean erroneous = (type.getKind() == TypeKind.ERROR && el.getKind() == ElementKind.CLASS) ||
+                            (el.getKind() == ElementKind.PACKAGE && el.getEnclosedElements().isEmpty());
+        String simpleName = ((IdentifierTree) tp.getLeaf()).getName().toString();
+        boolean upToDate;
+        List<String> result;
+
+        synchronized (currentIndexes) {
+            upToDate = classpathVersion == indexVersion;
+            result = currentIndexes.values()
+                                   .stream()
+                                   .flatMap(idx -> idx.classSimpleName2FQN.getOrDefault(simpleName,
+                                                                                        Collections.emptyList()).stream())
+                                   .distinct()
+                                   .filter(fqn -> isAccessible(at, scope, fqn))
+                                   .sorted()
+                                   .collect(Collectors.toList());
+        }
+
+        return new QualifiedNames(result, simpleName.length(), upToDate, !erroneous);
+    }
+
+    private boolean isAccessible(AnalyzeTask at, Scope scope, String fqn) {
+        TypeElement type = at.getElements().getTypeElement(fqn);
+        if (type == null)
+            return false;
+        return at.trees().isAccessible(scope, type);
+    }
+
+    //--------------------
+    // classpath indexing:
+    //--------------------
+
+    //the indexing can be suspended when a more important task is running:
+    private void waitIndexingNotSuspended() {
+        boolean suspendedNotified = false;
+        synchronized (suspendLock) {
+            while (suspend > 0) {
+                if (!suspendedNotified) {
+                    suspendedNotified = true;
+                }
+                try {
+                    suspendLock.wait();
+                } catch (InterruptedException ex) {
+                }
+            }
+        }
+    }
+
+    public void suspendIndexing() {
+        synchronized (suspendLock) {
+            suspend++;
+        }
+    }
+
+    public void resumeIndexing() {
+        synchronized (suspendLock) {
+            if (--suspend == 0) {
+                suspendLock.notifyAll();
+            }
+        }
+    }
+
+    //update indexes, either initially or after a classpath change:
+    private void refreshIndexes(int version) {
+        try {
+            Collection<Path> paths = new ArrayList<>();
+            MemoryFileManager fm = proc.taskFactory.fileManager();
+
+            appendPaths(fm, StandardLocation.PLATFORM_CLASS_PATH, paths);
+            appendPaths(fm, StandardLocation.CLASS_PATH, paths);
+            appendPaths(fm, StandardLocation.SOURCE_PATH, paths);
+
+            Map<Path, ClassIndex> newIndexes = new HashMap<>();
+
+            //setup existing/last known data:
+            for (Path p : paths) {
+                ClassIndex index = PATH_TO_INDEX.get(p);
+                if (index != null) {
+                    newIndexes.put(p, index);
+                }
+            }
+
+            synchronized (currentIndexes) {
+                //temporary setting old data:
+                currentIndexes.clear();
+                currentIndexes.putAll(newIndexes);
+            }
+
+            //update/compute the indexes if needed:
+            for (Path p : paths) {
+                waitIndexingNotSuspended();
+
+                ClassIndex index = indexForPath(p);
+                newIndexes.put(p, index);
+            }
+
+            synchronized (currentIndexes) {
+                currentIndexes.clear();
+                currentIndexes.putAll(newIndexes);
+            }
+        } catch (Exception ex) {
+            proc.debug(ex, "SourceCodeAnalysisImpl.refreshIndexes(" + version + ")");
+        } finally {
+            synchronized (currentIndexes) {
+                indexVersion = version;
+            }
+        }
+    }
+
+    private void appendPaths(MemoryFileManager fm, Location loc, Collection<Path> paths) {
+        Iterable<? extends Path> locationPaths = fm.getLocationAsPaths(loc);
+        if (locationPaths == null)
+            return ;
+        for (Path path : locationPaths) {
+            if (".".equals(path.toString())) {
+                //skip CWD
+                continue;
+            }
+
+            paths.add(path);
+        }
+    }
+
+    //create/update index a given JavaFileManager entry (which may be a JDK installation, a jar/zip file or a directory):
+    //if an index exists for the given entry, the existing index is kept unless the timestamp is modified
+    private ClassIndex indexForPath(Path path) {
+        if (isJRTMarkerFile(path)) {
+            FileSystem jrtfs = FileSystems.getFileSystem(URI.create("jrt:/"));
+            Path modules = jrtfs.getPath("modules");
+            return PATH_TO_INDEX.compute(path, (p, index) -> {
+                try {
+                    long lastModified = Files.getLastModifiedTime(modules).toMillis();
+                    if (index == null || index.timestamp != lastModified) {
+                        try (DirectoryStream<Path> stream = Files.newDirectoryStream(modules)) {
+                            index = doIndex(lastModified, path, stream);
+                        }
+                    }
+                    return index;
+                } catch (IOException ex) {
+                    proc.debug(ex, "SourceCodeAnalysisImpl.indexesForPath(" + path.toString() + ")");
+                    return new ClassIndex(-1, path, Collections.emptySet(), Collections.emptyMap());
+                }
+            });
+        } else if (!Files.isDirectory(path)) {
+            if (Files.exists(path)) {
+                return PATH_TO_INDEX.compute(path, (p, index) -> {
+                    try {
+                        long lastModified = Files.getLastModifiedTime(p).toMillis();
+                        if (index == null || index.timestamp != lastModified) {
+                            ClassLoader cl = SourceCodeAnalysisImpl.class.getClassLoader();
+
+                            try (FileSystem zip = FileSystems.newFileSystem(path, cl)) {
+                                index = doIndex(lastModified, path, zip.getRootDirectories());
+                            }
+                        }
+                        return index;
+                    } catch (IOException ex) {
+                        proc.debug(ex, "SourceCodeAnalysisImpl.indexesForPath(" + path.toString() + ")");
+                        return new ClassIndex(-1, path, Collections.emptySet(), Collections.emptyMap());
+                    }
+                });
+            } else {
+                return new ClassIndex(-1, path, Collections.emptySet(), Collections.emptyMap());
+            }
+        } else {
+            return PATH_TO_INDEX.compute(path, (p, index) -> {
+                //no persistence for directories, as we cannot check timestamps:
+                if (index == null) {
+                    index = doIndex(-1, path, Arrays.asList(p));
+                }
+                return index;
+            });
+        }
+    }
+
+    static boolean isJRTMarkerFile(Path path) {
+        return path.equals(Paths.get(System.getProperty("java.home"), "lib", "modules"));
+    }
+
+    //create an index based on the content of the given dirs; the original JavaFileManager entry is originalPath.
+    private ClassIndex doIndex(long timestamp, Path originalPath, Iterable<? extends Path> dirs) {
+        Set<String> packages = new HashSet<>();
+        Map<String, Collection<String>> classSimpleName2FQN = new HashMap<>();
+
+        for (Path d : dirs) {
+            try {
+                Files.walkFileTree(d, new FileVisitor<Path>() {
+                    int depth;
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        waitIndexingNotSuspended();
+                        if (depth++ == 0)
+                            return FileVisitResult.CONTINUE;
+                        String dirName = dir.getFileName().toString();
+                        String sep = dir.getFileSystem().getSeparator();
+                        dirName = dirName.endsWith(sep) ? dirName.substring(0, dirName.length() - sep.length())
+                                                        : dirName;
+                        if (SourceVersion.isIdentifier(dirName))
+                            return FileVisitResult.CONTINUE;
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                        waitIndexingNotSuspended();
+                        if (file.getFileName().toString().endsWith(".class")) {
+                            String relativePath = d.relativize(file).toString();
+                            String binaryName = relativePath.substring(0, relativePath.length() - 6).replace('/', '.');
+                            int packageDot = binaryName.lastIndexOf('.');
+                            if (packageDot > (-1)) {
+                                packages.add(binaryName.substring(0, packageDot));
+                            }
+                            String typeName = binaryName.replace('$', '.');
+                            addClassName2Map(classSimpleName2FQN, typeName);
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    @Override
+                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                        depth--;
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+            } catch (IOException ex) {
+                proc.debug(ex, "doIndex(" + d.toString() + ")");
+            }
+        }
+
+        return new ClassIndex(timestamp, originalPath, packages, classSimpleName2FQN);
+    }
+
+    private static void addClassName2Map(Map<String, Collection<String>> classSimpleName2FQN, String typeName) {
+        int simpleNameDot = typeName.lastIndexOf('.');
+        classSimpleName2FQN.computeIfAbsent(typeName.substring(simpleNameDot + 1), n -> new LinkedHashSet<>())
+                           .add(typeName);
+    }
+
+    //holder for indexed data about a given path
+    public static final class ClassIndex {
+        public final long timestamp;
+        public final Path forPath;
+        public final Set<String> packages;
+        public final Map<String, Collection<String>> classSimpleName2FQN;
+
+        public ClassIndex(long timestamp, Path forPath, Set<String> packages, Map<String, Collection<String>> classSimpleName2FQN) {
+            this.timestamp = timestamp;
+            this.forPath = forPath;
+            this.packages = packages;
+            this.classSimpleName2FQN = classSimpleName2FQN;
+        }
+
+    }
+
+    //for tests, to be able to wait until the indexing finishes:
+    public void waitBackgroundTaskFinished() throws Exception {
+        boolean upToDate;
+        synchronized (currentIndexes) {
+            upToDate = classpathVersion == indexVersion;
+        }
+        while (!upToDate) {
+            INDEXER.submit(() -> {}).get();
+            synchronized (currentIndexes) {
+                upToDate = classpathVersion == indexVersion;
+            }
+        }
+    }
+
+    /**
+     * A candidate for continuation of the given user's input.
+     */
+    private static class SuggestionImpl implements Suggestion {
+
+        private final String continuation;
+        private final boolean matchesType;
+
+        /**
+         * Create a {@code Suggestion} instance.
+         *
+         * @param continuation a candidate continuation of the user's input
+         * @param matchesType does the candidate match the target type
+         */
+        public SuggestionImpl(String continuation, boolean matchesType) {
+            this.continuation = continuation;
+            this.matchesType = matchesType;
+        }
+
+        /**
+         * The candidate continuation of the given user's input.
+         *
+         * @return the continuation string
+         */
+        @Override
+        public String continuation() {
+            return continuation;
+        }
+
+        /**
+         * Indicates whether input continuation matches the target type and is thus
+         * more likely to be the desired continuation. A matching continuation is
+         * preferred.
+         *
+         * @return {@code true} if this suggested continuation matches the
+         * target type; otherwise {@code false}
+         */
+        @Override
+        public boolean matchesType() {
+            return matchesType;
+        }
+    }
+
+    /**
+     * The result of {@code analyzeCompletion(String input)}.
+     * Describes the completeness and position of the first snippet in the given input.
+     */
+    private static class CompletionInfoImpl implements CompletionInfo {
+
+        private final Completeness completeness;
+        private final String source;
+        private final String remaining;
+
+        CompletionInfoImpl(Completeness completeness, String source, String remaining) {
+            this.completeness = completeness;
+            this.source = source;
+            this.remaining = remaining;
+        }
+
+        /**
+         * The analyzed completeness of the input.
+         *
+         * @return an enum describing the completeness of the input string.
+         */
+        @Override
+        public Completeness completeness() {
+            return completeness;
+        }
+
+        /**
+         * Input remaining after the complete part of the source.
+         *
+         * @return the portion of the input string that remains after the
+         * complete Snippet
+         */
+        @Override
+        public String remaining() {
+            return remaining;
+        }
+
+        /**
+         * Source code for the first Snippet of code input. For example, first
+         * statement, or first method declaration. Trailing semicolons will be
+         * added, as needed.
+         *
+         * @return the source of the first encountered Snippet
+         */
+        @Override
+        public String source() {
+            return source;
+        }
+    }
+
 }

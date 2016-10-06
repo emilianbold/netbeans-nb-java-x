@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,10 +29,9 @@
  * @author sogoel (rewrite)
  * @library /tools/lib
  * @modules jdk.compiler/com.sun.tools.javac.api
- *          jdk.compiler/com.sun.tools.javac.file
  *          jdk.compiler/com.sun.tools.javac.main
  *          jdk.compiler/com.sun.tools.sjavac
- * @build Wrapper ToolBox
+ * @build Wrapper toolbox.ToolBox
  * @run main Wrapper PermittedArtifact
  */
 
@@ -47,13 +46,10 @@ public class PermittedArtifact extends SJavacTester {
 
     //Verify that --permit-artifact=bin works
     void test() throws Exception {
-        clean(TEST_ROOT);
         Files.createDirectories(BIN);
-        clean(GENSRC, BIN);
 
         Map<String,Long> previous_bin_state = collectState(BIN);
 
-        ToolBox tb = new ToolBox();
         tb.writeFile(GENSRC + "/alfa/omega/A.java",
                      "package alfa.omega; public class A { }");
 
@@ -65,14 +61,12 @@ public class PermittedArtifact extends SJavacTester {
                 "--permit-artifact=" + BIN + "/alfa/omega/AA.class",
                 "-src", GENSRC.toString(),
                 "-d", BIN.toString(),
-                "--state-dir=" + BIN,
-                SERVER_ARG);
+                "--state-dir=" + BIN);
 
         Map<String,Long> new_bin_state = collectState(BIN);
         verifyThatFilesHaveBeenAdded(previous_bin_state, new_bin_state,
                                      BIN + "/alfa/omega/A.class",
                                      BIN + "/alfa/omega/AA.class",
                                      BIN + "/javac_state");
-        clean(GENSRC, BIN);
     }
 }

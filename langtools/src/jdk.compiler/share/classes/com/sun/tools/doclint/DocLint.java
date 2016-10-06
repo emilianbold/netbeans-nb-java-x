@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@ import javax.tools.StandardLocation;
 import com.sun.source.doctree.DocCommentTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ModuleTree;
 import com.sun.source.tree.PackageTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.Tree;
@@ -195,6 +196,9 @@ public class DocLint implements Plugin {
                 } else {
                     throw new BadArgs("dc.bad.value.for.option", arg, args[i]);
                 }
+            } else if ((arg.equals("-target") || arg.equals("-source")) && i + 1 < args.length) {
+                javacOpts.add(arg);
+                javacOpts.add(args[++i]);
             } else if (arg.equals(STATS)) {
                 env.messages.setStatsEnabled(true);
             } else if (arg.equals("-bootclasspath") && i + 1 < args.length) {
@@ -400,6 +404,12 @@ public class DocLint implements Plugin {
             visitDecl(tree, tree.getName());
             //return super.visitMethod(tree, ignore);
             return null;
+        }
+
+        @Override @DefinedBy(Api.COMPILER_TREE)
+        public Void visitModule(ModuleTree tree, Void ignore) {
+            visitDecl(tree, null);
+            return super.visitModule(tree, ignore);
         }
 
         @Override @DefinedBy(Api.COMPILER_TREE)
