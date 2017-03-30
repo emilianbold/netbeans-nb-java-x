@@ -302,7 +302,7 @@ public abstract class Scope {
         /** Use as a "not-found" result for lookup.
          * Also used to mark deleted entries in the table.
          */
-        private static final Entry sentinel = new Entry(null, null, null, null);
+        protected static final Entry sentinel = new Entry(null, null, null, null);
 
         /** The hash table's initial size.
          */
@@ -740,14 +740,18 @@ public abstract class Scope {
          * No further changes to class hierarchy or class content will be reflected.
          */
         public void finalizeScope() {
-            for (List<Scope> scopes = this.subScopes; scopes.nonEmpty(); scopes = scopes.tail) {
+            OUTER: for (List<Scope> scopes = this.subScopes; scopes.nonEmpty(); scopes = scopes.tail) {
                 Scope impScope = scopes.head;
 
                 if (impScope instanceof FilterImportScope && impScope.owner.kind == Kind.TYP) {
                     WriteableScope finalized = WriteableScope.create(impScope.owner);
+                    int count = 0;
 
                     for (Symbol sym : impScope.getSymbols()) {
                         finalized.enter(sym);
+                        if (count++ > 256) {
+                            continue OUTER;
+                        }
                     }
 
                     finalized.listeners.add(new ScopeListener() {
@@ -957,7 +961,9 @@ public abstract class Scope {
 
                 if (inspectSuperTypes) {
                     // also import inherited names
-                    results = importFrom(types.supertype(tsym.type).tsym, results);
+                    Type sup = types.supertype(tsym.type);
+                    if (sup != null)
+                        results = importFrom(sup.tsym, results);
                     for (Type t : types.interfaces(tsym.type))
                         results = importFrom(t.tsym, results);
                 }
@@ -1080,7 +1086,7 @@ public abstract class Scope {
         public Entry lookup(Name name) {
             Entry e = super.lookup(name);
             if (e.scope == null)
-                return new Entry(owner, null, null, null);
+                return new Entry(owner, sentinel, null, null);
             else
                 return e;
         }
