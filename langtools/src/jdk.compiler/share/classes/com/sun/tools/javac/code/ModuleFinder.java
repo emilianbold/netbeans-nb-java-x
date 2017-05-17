@@ -372,7 +372,17 @@ public class ModuleFinder {
                 msym.module_info.completer = new Symbol.Completer() {
                     @Override
                     public void complete(Symbol sym) throws CompletionFailure {
-                        classFinder.fillIn(msym.module_info);
+                        try {
+                            classFinder.fillIn(msym.module_info);
+                        } catch (Exception ex) {
+                            msym.kind = ERR;
+                            //make sure the module is initialized:
+                            msym.directives = List.nil();
+                            msym.exports = List.nil();
+                            msym.provides = List.nil();
+                            msym.requires = List.nil();
+                            msym.uses = List.nil();
+                        }
                     }
                     @Override
                     public String toString() {
