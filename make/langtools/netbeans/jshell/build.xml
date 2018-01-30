@@ -71,7 +71,7 @@
 
     -->
     <target name="-post-init">
-        <available file="../../../../nbbuild/netbeans/java/modules/ext" type="dir" property="modules.ext.exists"/>
+        <available file="../../../../../nbbuild/netbeans/java/modules/ext" type="dir" property="modules.ext.exists"/>
     </target>
     
     <target name="-separate-jars">
@@ -86,11 +86,11 @@
 
     <target name="-copy-jars-to-build" if="modules.ext.exists">
 	<!--
-        <copy file="${dist.dir}/jshell.jar" tofile="../../../../nbbuild/netbeans/java/modules/ext/nb-jshell.jar" />
+        <copy file="${dist.dir}/jshell.jar" tofile="../../../../../nbbuild/netbeans/java/modules/ext/nb-jshell.jar" />
 	-->
-        <copy file="${dist.dir}/jshell.jar"  tofile="../../../../libs.jshell/external/jshell.jar"/>
-        <copy file="${dist.dir}/jshell.jar"  tofile="../../../../libs.jshell.compile/external/jshell.jar"/>
-        <touch file="../../../../nbbuild/netbeans/java/.lastModified" />
+        <copy file="${dist.dir}/jshell.jar"  tofile="../../../../../libs.jshell/external/jshell.jar"/>
+        <copy file="${dist.dir}/jshell.jar"  tofile="../../../../../libs.jshell.compile/external/jshell.jar"/>
+        <touch file="../../../../../nbbuild/netbeans/java/.lastModified" />
     </target>
 
     <target name="-post-jar" depends="-post-init,-separate-jars,-copy-jars-to-build">
