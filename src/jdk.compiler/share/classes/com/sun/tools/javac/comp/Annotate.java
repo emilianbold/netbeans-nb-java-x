@@ -204,7 +204,7 @@ public class Annotate {
     private ListBuffer<Runnable> validateQ = new ListBuffer<>();
 
     private int flushCount = 0;
-    private boolean isFlushing() { return flushCount > 0; }
+    public boolean isFlushing() { return flushCount > 0; }
     private void startFlushing() { flushCount++; }
     private void doneFlushing() { flushCount--; }
 
@@ -465,10 +465,14 @@ public class Annotate {
 
         boolean elidedValue = false;
         // special case: elided "value=" assumed
-        if (args.length() == 1 && !args.head.hasTag(ASSIGN)) {
-            args.head = make.at(args.head.pos).
-                    Assign(make.Ident(names.value), args.head);
-            elidedValue = true;
+        if (args.length() == 1) {
+            if (!args.head.hasTag(ASSIGN)) {
+                args.head = make.at(Position.NOPOS).
+                        Assign(make.Ident(names.value), args.head);
+                elidedValue = true;
+            } else if (args.head.pos == Position.NOPOS) {
+                elidedValue = true;
+            }
         }
 
         ListBuffer<Pair<MethodSymbol,Attribute>> buf = new ListBuffer<>();
@@ -665,10 +669,12 @@ public class Annotate {
             log.error(na.elemtype.pos(), Errors.NewNotAllowedInAnnotation);
         }
         ListBuffer<Attribute> buf = new ListBuffer<>();
-        for (List<JCExpression> l = na.elems; l.nonEmpty(); l=l.tail) {
-            buf.append(attributeAnnotationValue(types.elemtype(expectedElementType),
-                    l.head,
-                    env));
+        if (na.elems != null) {
+            for (List<JCExpression> l = na.elems; l.nonEmpty(); l=l.tail) {
+                buf.append(attributeAnnotationValue(types.elemtype(expectedElementType),
+                        l.head,
+                        env));
+            }
         }
         na.type = expectedElementType;
         return new Attribute.
@@ -1099,6 +1105,11 @@ public class Annotate {
             scan(tree.args);
             // the anonymous class instantiation if any will be visited separately.
         }
+
+        @Override
+        public void visitErroneous(JCErroneous tree) {
+            scan(tree.errs);
+        }
     }
 
     /*********************
@@ -1206,6 +1217,11 @@ public class Annotate {
             } else if (t == tab.repeatableType) {
                 repeatable = Annotate.this.attributeAnnotation(tree, tab.repeatableType, env);
             }
+        }
+
+        @Override
+        public void visitErroneous(JCErroneous tree) {
+            scan(tree.errs);
         }
     }
 
