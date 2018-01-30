@@ -31,6 +31,7 @@ import java.util.Arrays;
 import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.resources.CompilerProperties.Errors;
 import com.sun.tools.javac.util.ArrayUtils;
+import com.sun.tools.javac.util.JCDiagnostic.SimpleDiagnosticPosition;
 import com.sun.tools.javac.util.Log;
 import com.sun.tools.javac.util.Name;
 import com.sun.tools.javac.util.Names;
@@ -70,7 +71,11 @@ public class UnicodeReader {
     /** A character buffer for saved chars.
      */
     protected char[] sbuf = new char[128];
+    private char replacedCharacter;
+    protected int realLength;
     protected int sp;
+
+    int seek;
 
     /**
      * Create a scanner from the input array.  This method might
@@ -89,9 +94,10 @@ public class UnicodeReader {
     protected UnicodeReader(ScannerFactory sf, char[] input, int inputLength) {
         log = sf.log;
         names = sf.names;
+        realLength = inputLength;
         if (inputLength == input.length) {
             if (input.length > 0 && Character.isWhitespace(input[input.length - 1])) {
-                inputLength--;
+                replacedCharacter = input[--inputLength];
             } else {
                 input = Arrays.copyOf(input, inputLength + 1);
             }
@@ -156,6 +162,7 @@ public class UnicodeReader {
      *  (Spec 3.3).
      */
     protected void convertUnicode() {
+        int startPos = bp;
         if (ch == '\\' && unicodeConversionBp != bp) {
             bp++; ch = buf[bp];
             if (ch == 'u') {
@@ -177,7 +184,7 @@ public class UnicodeReader {
                         return;
                     }
                 }
-                log.error(bp, Errors.IllegalUnicodeEsc);
+                log.error(new SimpleDiagnosticPosition(startPos + seek, bp + seek), Errors.IllegalUnicodeEsc);
             } else {
                 bp--;
                 ch = '\\';
@@ -257,8 +264,11 @@ public class UnicodeReader {
      * Unicode escape sequences are not translated.
      */
     public char[] getRawCharacters() {
-        char[] chars = new char[buflen];
+        char[] chars = new char[realLength];
         System.arraycopy(buf, 0, chars, 0, buflen);
+        if (buflen < chars.length) {
+            chars[buflen] = replacedCharacter;
+        }
         return chars;
     }
 
