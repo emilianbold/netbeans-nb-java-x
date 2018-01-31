@@ -150,7 +150,9 @@ public class Infer {
 
         @Override
         InapplicableMethodException setMessage(JCDiagnostic diag) {
-            messages = messages.append(diag);
+            if (diag != null) {
+                messages = messages.append(diag);
+            }
             return this;
         }
 
@@ -1453,9 +1455,8 @@ public class Infer {
             Type solve(UndetVar uv, InferenceContext inferenceContext) {
                 Infer infer = inferenceContext.infer;
                 List<Type> lobounds = filterBounds(uv, inferenceContext);
-                //note: lobounds should have at least one element
-                Type owntype = lobounds.tail.tail == null  ? lobounds.head : infer.types.lub(lobounds);
-                if (owntype.isPrimitive() || owntype.hasTag(ERROR)) {
+                Type owntype = lobounds.nonEmpty() ? lobounds.tail.tail == null ? lobounds.head : infer.types.lub(lobounds) : null;
+                if (owntype == null || owntype.isPrimitive() || owntype.hasTag(ERROR)) {
                     throw infer.inferenceException
                         .setMessage("no.unique.minimal.instance.exists",
                                     uv.qtype, lobounds);
@@ -1496,9 +1497,8 @@ public class Infer {
             Type solve(UndetVar uv, InferenceContext inferenceContext) {
                 Infer infer = inferenceContext.infer;
                 List<Type> hibounds = filterBounds(uv, inferenceContext);
-                //note: hibounds should have at least one element
-                Type owntype = hibounds.tail.tail == null  ? hibounds.head : infer.types.glb(hibounds);
-                if (owntype.isPrimitive() || owntype.hasTag(ERROR)) {
+                Type owntype = hibounds.nonEmpty() ? hibounds.tail.tail == null ? hibounds.head : infer.types.glb(hibounds) : null;
+                if (owntype == null || owntype.isPrimitive() || owntype.hasTag(ERROR)) {
                     throw infer.inferenceException
                         .setMessage("no.unique.maximal.instance.exists",
                                     uv.qtype, hibounds);

@@ -196,6 +196,8 @@ public class Flow {
     private       TreeMaker make;
     private final Resolve rs;
     private final JCDiagnostic.Factory diags;
+    private final Enter enter;
+    private JCClassDecl reanalyzedClass;
     private Env<AttrContext> attrEnv;
     private       Lint lint;
     private final boolean allowImprovedRethrowAnalysis;
@@ -254,6 +256,20 @@ public class Flow {
         }
     }
 
+    public void reanalyzeMethod (final TreeMaker make, final JCClassDecl classDef) {
+        JCClassDecl oldReanalyzedClass = reanalyzedClass;
+        try {
+            reanalyzedClass = classDef;
+            Env<AttrContext> env = enter.getEnv(classDef.sym);
+            new AliveAnalyzer().analyzeTree(env, classDef, make);
+            new AssignAnalyzer().analyzeTree(env);
+            new FlowAnalyzer().analyzeTree(env, classDef, make);
+            new CaptureAnalyzer().analyzeTree(env, classDef, make);
+        } finally {
+            reanalyzedClass = oldReanalyzedClass;
+        }
+    }
+
     /**
      * Definite assignment scan mode
      */
@@ -291,6 +307,7 @@ public class Flow {
         lint = Lint.instance(context);
         rs = Resolve.instance(context);
         diags = JCDiagnostic.Factory.instance(context);
+        enter = Enter.instance(context);
         Source source = Source.instance(context);
         allowImprovedRethrowAnalysis = Feature.IMPROVED_RETHROW_ANALYSIS.allowedInSource(source);
         allowImprovedCatchAnalysis = Feature.IMPROVED_CATCH_ANALYSIS.allowedInSource(source);
@@ -469,6 +486,7 @@ public class Flow {
                     if (!l.head.hasTag(METHODDEF) &&
                         (TreeInfo.flags(l.head) & STATIC) != 0) {
                         scanDef(l.head);
+                        if (pendingExits.nonEmpty()) pendingExits.clear();
                     }
                 }
 
@@ -477,6 +495,7 @@ public class Flow {
                     if (!l.head.hasTag(METHODDEF) &&
                         (TreeInfo.flags(l.head) & STATIC) == 0) {
                         scanDef(l.head);
+                        if (pendingExits.nonEmpty()) pendingExits.clear();
                     }
                 }
 
@@ -494,7 +513,7 @@ public class Flow {
         }
 
         public void visitMethodDef(JCMethodDecl tree) {
-            if (tree.body == null) return;
+            if (tree.body == null || tree.sym == null) return;
             Lint lintPrev = lint;
 
             lint = lint.augment(tree.sym);
@@ -505,7 +524,7 @@ public class Flow {
                 alive = true;
                 scanStat(tree.body);
 
-                if (alive && !tree.sym.type.getReturnType().hasTag(VOID))
+                if (alive && tree.sym.type.getReturnType() != null && !tree.sym.type.getReturnType().hasTag(VOID))
                     log.error(TreeInfo.diagEndPos(tree.body), Errors.MissingRetStmt);
 
                 List<PendingExit> exits = pendingExits.toList();
@@ -513,7 +532,7 @@ public class Flow {
                 while (exits.nonEmpty()) {
                     PendingExit exit = exits.head;
                     exits = exits.tail;
-                    Assert.check(exit.tree.hasTag(RETURN));
+                    Assert.check(exit.tree.hasTag(RETURN) || log.getErrDiag(exit.tree) != null);
                 }
             } finally {
                 lint = lintPrev;
@@ -521,7 +540,7 @@ public class Flow {
         }
 
         public void visitVarDef(JCVariableDecl tree) {
-            if (tree.init != null) {
+            if (tree.init != null && tree.sym != null) {
                 Lint lintPrev = lint;
                 lint = lint.augment(tree.sym);
                 try{
@@ -542,7 +561,8 @@ public class Flow {
             scanStat(tree.body);
             alive |= resolveContinues(tree);
             scan(tree.cond);
-            alive = alive && !tree.cond.type.isTrue();
+            if (tree.cond.type != null)
+                alive = alive && !tree.cond.type.isTrue();
             alive |= resolveBreaks(tree, prevPendingExits);
         }
 
@@ -550,18 +570,19 @@ public class Flow {
             ListBuffer<PendingExit> prevPendingExits = pendingExits;
             pendingExits = new ListBuffer<>();
             scan(tree.cond);
-            alive = !tree.cond.type.isFalse();
+            if (tree.cond.type != null)
+                alive = !tree.cond.type.isFalse();
             scanStat(tree.body);
             alive |= resolveContinues(tree);
             alive = resolveBreaks(tree, prevPendingExits) ||
-                !tree.cond.type.isTrue();
+                tree.cond.type != null && !tree.cond.type.isTrue();
         }
 
         public void visitForLoop(JCForLoop tree) {
             ListBuffer<PendingExit> prevPendingExits = pendingExits;
             scanStats(tree.init);
             pendingExits = new ListBuffer<>();
-            if (tree.cond != null) {
+            if (tree.cond != null && tree.cond.type != null) {
                 scan(tree.cond);
                 alive = !tree.cond.type.isFalse();
             } else {
@@ -571,7 +592,7 @@ public class Flow {
             alive |= resolveContinues(tree);
             scan(tree.step);
             alive = resolveBreaks(tree, prevPendingExits) ||
-                tree.cond != null && !tree.cond.type.isTrue();
+                tree.cond != null && tree.cond.type != null && !tree.cond.type.isTrue();
         }
 
         public void visitForeachLoop(JCEnhancedForLoop tree) {
@@ -831,11 +852,13 @@ public class Flow {
          *  is caught.
          */
         void markThrown(JCTree tree, Type exc) {
-            if (!chk.isUnchecked(tree.pos(), exc)) {
-                if (!chk.isHandled(exc, caught)) {
-                    pendingExits.append(new FlowPendingExit(tree, exc));
+            if (exc != syms.unknownType) {
+                if (!chk.isUnchecked(tree.pos(), exc)) {
+                    if (!chk.isHandled(exc, caught)) {
+                        pendingExits.append(new FlowPendingExit(tree, exc));
+                    }
+                    thrown = chk.incl(exc, thrown);
                 }
-                thrown = chk.incl(exc, thrown);
             }
         }
 
@@ -860,7 +883,8 @@ public class Flow {
             }
             classDef = tree;
             thrown = List.nil();
-            lint = lint.augment(tree.sym);
+            if (tree.sym != null)
+                lint = lint.augment(tree.sym);
 
             try {
                 // process all the static initializers
@@ -878,8 +902,9 @@ public class Flow {
                     boolean firstConstructor = true;
                     for (List<JCTree> l = tree.defs; l.nonEmpty(); l = l.tail) {
                         if (TreeInfo.isInitialConstructor(l.head)) {
-                            List<Type> mthrown =
-                                ((JCMethodDecl) l.head).sym.type.getThrownTypes();
+                            MethodSymbol sym = ((JCMethodDecl) l.head).sym;
+                            List<Type> mthrown = sym != null
+                                    ? sym.type.getThrownTypes() : List.<Type>nil();
                             if (firstConstructor) {
                                 caught = mthrown;
                                 firstConstructor = false;
@@ -905,7 +930,7 @@ public class Flow {
                 // Changing the throws clause on the fly is okay here because
                 // the anonymous constructor can't be invoked anywhere else,
                 // and its type hasn't been cached.
-                if (anonymousClass) {
+                if (anonymousClass && thrownPrev != null) {
                     for (List<JCTree> l = tree.defs; l.nonEmpty(); l = l.tail) {
                         if (TreeInfo.isConstructor(l.head)) {
                             JCMethodDecl mdef = (JCMethodDecl)l.head;
@@ -937,7 +962,7 @@ public class Flow {
         }
 
         public void visitMethodDef(JCMethodDecl tree) {
-            if (tree.body == null) return;
+            if (tree.body == null || tree.sym == null) return;
 
             List<Type> caughtPrev = caught;
             List<Type> mthrown = tree.sym.type.getThrownTypes();
@@ -966,9 +991,7 @@ public class Flow {
                 while (exits.nonEmpty()) {
                     FlowPendingExit exit = exits.head;
                     exits = exits.tail;
-                    if (exit.thrown == null) {
-                        Assert.check(exit.tree.hasTag(RETURN));
-                    } else {
+                    if (exit.thrown != null) {
                         // uncaught throws will be reported later
                         pendingExits.append(exit);
                     }
@@ -980,6 +1003,7 @@ public class Flow {
         }
 
         public void visitVarDef(JCVariableDecl tree) {
+            if (tree.sym == null) return;
             if (tree.init != null) {
                 Lint lintPrev = lint;
                 lint = lint.augment(tree.sym);
@@ -1120,11 +1144,12 @@ public class Flow {
                 List<Type> rethrownTypes = chk.diff(thrownInTry, caughtInTry);
                 for (JCExpression ct : subClauses) {
                     Type exc = ct.type;
-                    if (exc != syms.unknownType) {
+                    if (exc != null && exc != syms.unknownType) {
                         ctypes = ctypes.append(exc);
                         if (types.isSameType(exc, syms.objectType))
                             continue;
-                        checkCaughtType(l.head.pos(), exc, thrownInTry, caughtInTry);
+                        checkCaughtType(subClauses.size() > 1 ? ct.pos() : l.head.pos(), 
+                                exc, thrownInTry, caughtInTry);
                         caughtInTry = chk.incl(exc, caughtInTry);
                     }
                 }
@@ -1230,18 +1255,22 @@ public class Flow {
         public void visitApply(JCMethodInvocation tree) {
             scan(tree.meth);
             scan(tree.args);
-            for (List<Type> l = tree.meth.type.getThrownTypes(); l.nonEmpty(); l = l.tail)
-                markThrown(tree, l.head);
+            if (tree.meth.type != null) {
+                for (List<Type> l = tree.meth.type.getThrownTypes(); l.nonEmpty(); l = l.tail)
+                    markThrown(tree, l.head);
+            }
         }
 
         public void visitNewClass(JCNewClass tree) {
             scan(tree.encl);
             scan(tree.args);
            // scan(tree.def);
-            for (List<Type> l = tree.constructorType.getThrownTypes();
-                 l.nonEmpty();
-                 l = l.tail) {
-                markThrown(tree, l.head);
+            if (tree.constructorType != null) {
+                for (List<Type> l = tree.constructorType.getThrownTypes();
+                     l.nonEmpty();
+                     l = l.tail) {
+                    markThrown(tree, l.head);
+                }
             }
             List<Type> caughtPrev = caught;
             try {
@@ -1253,7 +1282,7 @@ public class Flow {
                 // each of the constructor's formal thrown types in the set of
                 // 'caught/declared to be thrown' types, for the duration of
                 // the class def analysis.
-                if (tree.def != null)
+                if (tree.def != null && tree.constructor != null && tree.constructor.type != null)
                     for (List<Type> l = tree.constructor.type.getThrownTypes();
                          l.nonEmpty();
                          l = l.tail) {
@@ -1285,9 +1314,7 @@ public class Flow {
                 while (exits.nonEmpty()) {
                     FlowPendingExit exit = exits.head;
                     exits = exits.tail;
-                    if (exit.thrown == null) {
-                        Assert.check(exit.tree.hasTag(RETURN));
-                    } else {
+                    if (exit.thrown != null) {
                         // uncaught throws will be reported later
                         pendingExits.append(exit);
                     }
@@ -1560,7 +1587,7 @@ public class Flow {
          *  I.e. is symbol either a local or a blank final variable?
          */
         protected boolean trackable(VarSymbol sym) {
-            return
+            return sym != null && sym.owner != null &&
                 sym.pos >= startPos &&
                 ((sym.owner.kind == MTH ||
                 isFinalUninitializedField(sym)));
@@ -1647,7 +1674,7 @@ public class Flow {
             tree = TreeInfo.skipParens(tree);
             if (tree.hasTag(IDENT) || tree.hasTag(SELECT)) {
                 Symbol sym = TreeInfo.symbol(tree);
-                if (sym.kind == VAR) {
+                if (sym != null && sym.kind == VAR) {
                     letInit(tree.pos(), (VarSymbol)sym);
                 }
             }
@@ -1723,7 +1750,7 @@ public class Flow {
          *  rather than (un)inits on exit.
          */
         void scanCond(JCTree tree) {
-            if (tree.type.isFalse()) {
+            if (tree.type != null && tree.type.isFalse()) {
                 if (inits.isReset()) merge();
                 initsWhenTrue.assign(inits);
                 initsWhenTrue.inclRange(firstadr, nextadr);
@@ -1731,7 +1758,7 @@ public class Flow {
                 uninitsWhenTrue.inclRange(firstadr, nextadr);
                 initsWhenFalse.assign(inits);
                 uninitsWhenFalse.assign(uninits);
-            } else if (tree.type.isTrue()) {
+            } else if (tree.type != null && tree.type.isTrue()) {
                 if (inits.isReset()) merge();
                 initsWhenFalse.assign(inits);
                 initsWhenFalse.inclRange(firstadr, nextadr);
@@ -1792,6 +1819,7 @@ public class Flow {
                         if (!l.head.hasTag(METHODDEF) &&
                             (TreeInfo.flags(l.head) & STATIC) != 0) {
                             scan(l.head);
+                            if (pendingExits.nonEmpty()) pendingExits.clear();
                         }
                     }
 
@@ -1813,6 +1841,7 @@ public class Flow {
                         if (!l.head.hasTag(METHODDEF) &&
                             (TreeInfo.flags(l.head) & STATIC) == 0) {
                             scan(l.head);
+                            if (pendingExits.nonEmpty()) pendingExits.clear();
                         }
                     }
 
@@ -1834,7 +1863,7 @@ public class Flow {
         }
 
         public void visitMethodDef(JCMethodDecl tree) {
-            if (tree.body == null) {
+            if (tree.body == null || tree.sym == null) {
                 return;
             }
 
@@ -1906,8 +1935,7 @@ public class Flow {
                     while (exits.nonEmpty()) {
                         AssignPendingExit exit = exits.head;
                         exits = exits.tail;
-                        Assert.check(exit.tree.hasTag(RETURN), exit.tree);
-                        if (isInitialConstructor) {
+                        if (isInitialConstructor && exit.tree.hasTag(RETURN)) {
                             inits.assign(exit.exit_inits);
                             for (int i = firstadr; i < nextadr; i++) {
                                 checkInit(exit.tree.pos(), vardecls[i].sym);
@@ -1933,6 +1961,7 @@ public class Flow {
         }
 
         public void visitVarDef(JCVariableDecl tree) {
+            if (tree.sym == null) return;
             Lint lintPrev = lint;
             lint = lint.augment(tree.sym);
             try{
@@ -2082,7 +2111,8 @@ public class Flow {
             final Bits initsStart = new Bits(inits);
             final Bits uninitsStart = new Bits(uninits);
 
-            letInit(tree.pos(), tree.var.sym);
+            if (tree.var.sym != null)
+                letInit(tree.pos(), tree.var.sym);
             pendingExits = new ListBuffer<>();
             int prevErrors = log.nerrors;
             do {
@@ -2211,7 +2241,9 @@ public class Flow {
                 /* If this is a TWR and we are executing the code from Gen,
                  * then there can be synthetic variables, ignore them.
                  */
-                initParam(param);
+                if (param.sym != null) {
+                    initParam(param);
+                }
                 scan(l.head.body);
                 initsEnd.andSet(inits);
                 uninitsEnd.andSet(uninits);
@@ -2255,8 +2287,8 @@ public class Flow {
             final Bits uninitsBeforeElse = new Bits(uninitsWhenFalse);
             inits.assign(initsWhenTrue);
             uninits.assign(uninitsWhenTrue);
-            if (tree.truepart.type.hasTag(BOOLEAN) &&
-                tree.falsepart.type.hasTag(BOOLEAN)) {
+            if (tree.truepart.type != null && tree.truepart.type.hasTag(BOOLEAN) &&
+                tree.falsepart.type != null && tree.falsepart.type.hasTag(BOOLEAN)) {
                 // if b and c are boolean valued, then
                 // v is (un)assigned after a?b:c when true iff
                 //    v is (un)assigned after b when true and
@@ -2475,7 +2507,7 @@ public class Flow {
         }
 
         public void visitIdent(JCIdent tree) {
-            if (tree.sym.kind == VAR) {
+            if (tree.sym != null && tree.sym.kind == VAR) {
                 checkInit(tree.pos(), (VarSymbol)tree.sym);
                 referenced(tree.sym);
             }
@@ -2638,7 +2670,7 @@ public class Flow {
 
         @Override
         public void visitIdent(JCIdent tree) {
-            if (tree.sym.kind == VAR) {
+            if (tree.sym != null && tree.sym.kind == VAR) {
                 checkEffectivelyFinal(tree, (VarSymbol)tree.sym);
             }
         }
