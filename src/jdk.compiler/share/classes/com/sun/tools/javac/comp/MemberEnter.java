@@ -417,7 +417,7 @@ public class MemberEnter extends JCTree.Visitor {
             deferredLintHandler.setPos(prevLintPos);
         }
 
-        if (tree.vartype.type != null && tree.vartype.type.hasTag(VOID)) {
+        if (tree.vartype != null && tree.vartype.type != null && tree.vartype.type.hasTag(VOID)) {
             log.error(tree.vartype, "illegal.start.of.type");
             tree.vartype.type = syms.errType;
         }
