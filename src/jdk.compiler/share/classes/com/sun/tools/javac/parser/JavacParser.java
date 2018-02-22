@@ -3172,6 +3172,7 @@ public class JavacParser implements Parser {
      *           | Expression
      */
     protected JCTree resource() {
+        int startPos = token.pos;
         if (token.kind == FINAL || token.kind == MONKEYS_AT) {
             JCModifiers mods = optFinal(Flags.FINAL);
             JCExpression t = parseType(true);
@@ -3182,7 +3183,7 @@ public class JavacParser implements Parser {
             JCModifiers mods = F.at(Position.NOPOS).Modifiers(Flags.FINAL);
             return variableDeclaratorRest(token.pos, mods, t, ident(), true, null, true);
         } else {
-            checkSourceLevel(Feature.EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES);
+            checkSourceLevel(startPos, Feature.EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES);
             if (!t.hasTag(IDENT) && !t.hasTag(SELECT)) {
                 log.error(t.pos(), Errors.TryWithResourcesExprNeedsVar);
             }
