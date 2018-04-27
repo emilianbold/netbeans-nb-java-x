@@ -82,6 +82,8 @@ public class JavaTokenizer {
 
     protected ScannerFactory fac;
 
+    int seek;
+
     private static final boolean hexFloatsWork = hexFloatsWork();
     private static boolean hexFloatsWork() {
         try {
@@ -127,13 +129,13 @@ public class JavaTokenizer {
     /** Report an error at the given position using the provided arguments.
      */
     protected void lexError(int pos, JCDiagnostic.Error key) {
-        log.error(pos, key);
+        log.error(seek + pos, key);
         tk = TokenKind.ERROR;
         errPos = pos;
     }
 
     protected void lexError(DiagnosticFlag flags, int pos, JCDiagnostic.Error key) {
-        log.error(flags, pos, key);
+        log.error(flags, seek + pos, key);
         tk = TokenKind.ERROR;
         errPos = pos;
     }
@@ -514,6 +516,7 @@ public class JavaTokenizer {
                         reader.putChar('0');
                         if (reader.ch == '_') {
                             int savePos = reader.bp;
+                            checkSourceLevel(pos, Feature.UNDERSCORES_IN_LITERALS);
                             do {
                                 reader.scanChar();
                             } while (reader.ch == '_');
@@ -662,7 +665,7 @@ public class JavaTokenizer {
                             scanNumber(pos, 10);
                         } else if (reader.bp == reader.buflen || reader.ch == EOI && reader.bp + 1 == reader.buflen) { // JLS 3.5
                             tk = TokenKind.EOF;
-                            pos = reader.buflen;
+                            pos = reader.realLength;
                         } else {
                             String arg;
 
@@ -684,10 +687,10 @@ public class JavaTokenizer {
             }
             endPos = reader.bp;
             switch (tk.tag) {
-                case DEFAULT: return new Token(tk, pos, endPos, comments);
-                case NAMED: return new NamedToken(tk, pos, endPos, name, comments);
-                case STRING: return new StringToken(tk, pos, endPos, reader.chars(), comments);
-                case NUMERIC: return new NumericToken(tk, pos, endPos, reader.chars(), radix, comments);
+                case DEFAULT: return new Token(tk, seek + pos, seek + endPos, comments);
+                case NAMED: return new NamedToken(tk, seek + pos, seek + endPos, name, comments);
+                case STRING: return new StringToken(tk, seek + pos, seek + endPos, reader.chars(), comments);
+                case NUMERIC: return new NumericToken(tk, seek + pos, seek + endPos, reader.chars(), radix, comments);
                 default: throw new AssertionError();
             }
         }
@@ -710,13 +713,13 @@ public class JavaTokenizer {
     /** Return the position where a lexical error occurred;
      */
     public int errPos() {
-        return errPos;
+        return errPos == Position.NOPOS ? errPos : seek + errPos;
     }
 
     /** Set the position where a lexical error occurred;
      */
     public void errPos(int pos) {
-        errPos = pos;
+        errPos = pos == Position.NOPOS ? pos: pos - seek;
     }
 
     /**
@@ -761,7 +764,8 @@ public class JavaTokenizer {
      *
      * @return a LineMap */
     public Position.LineMap getLineMap() {
-        return Position.makeLineMap(reader.getRawCharacters(), reader.buflen, false);
+        char[] buf = reader.getRawCharacters();
+        return Position.makeLineMap(buf, buf.length, false);
     }
 
 

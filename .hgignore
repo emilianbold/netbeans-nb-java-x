@@ -1,3 +1,15 @@
+^make/langtools/netbeans/nb-javac/build/
+^make/langtools/netbeans/nb-javac/dist/
+^make/langtools/netbeans/nb-javac/nbproject/private/
+^make/langtools/netbeans/nb-javac-modules/build/
+^make/langtools/netbeans/nb-javac-modules/nbproject/private/
+^make/langtools/netbeans/nb-javac-modules/[^/]*/build/
+^make/langtools/netbeans/nb-javac-modules/[^/]*/release/
+^make/langtools/netbeans/nb-javac-modules/[^/]*/nbproject/private/
+^make/langtools/netbeans/jshell/build/
+^make/langtools/netbeans/jshell/dist/
+^make/langtools/netbeans/jshell/nbproject/private/
+^make/langtools/netbeans/hudson/cache/
 ^build/
 ^dist/
 ^.idea/
