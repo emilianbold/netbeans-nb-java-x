@@ -433,7 +433,9 @@ public class MemberEnter extends JCTree.Visitor {
             tree.vartype.type = atype.makeVarargs();
         }
         WriteableScope enclScope = enter.enterScope(env);
-        Type vartype = tree.isImplicitlyTyped() ? Type.noType : tree.vartype.type;
+        Type vartype = tree.isImplicitlyTyped()
+                ? env.info.scope.owner.kind == MTH ? Type.noType : syms.errType
+                : tree.vartype.type;
         VarSymbol v = null;
         boolean doEnterSymbol = true;
         if ((enclScope.owner.flags_field & FROMCLASS) != 0) {

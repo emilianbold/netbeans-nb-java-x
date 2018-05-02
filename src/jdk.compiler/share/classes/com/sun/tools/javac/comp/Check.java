@@ -939,6 +939,8 @@ public class Check {
         } else if (t.hasTag(VOID)) {
             log.error(pos, Errors.CantInferLocalVarType(name, Fragments.LocalCantInferVoid));
             return types.createErrorType(t);
+        } else if (t.hasTag(NONE)) {
+            return types.createErrorType(t);
         }
 
         //upward project the initializer type
