@@ -238,6 +238,7 @@ public class Code {
         case DOUBLE: return DOUBLEcode;
         case BOOLEAN: return BYTEcode;
         case VOID: return VOIDcode;
+        case ERROR:
         case CLASS:
         case ARRAY:
         case METHOD:
@@ -277,8 +278,10 @@ public class Code {
      */
     public static int width(List<Type> types) {
         int w = 0;
-        for (List<Type> l = types; l.nonEmpty(); l = l.tail)
-            w = w + width(l.head);
+        if (types != null) {
+            for (List<Type> l = types; l.nonEmpty(); l = l.tail)
+                w = w + width(l.head);
+        }
         return w;
     }
 
@@ -1761,15 +1764,16 @@ public class Code {
 
         /** Force the top of the stack to be treated as this supertype
          *  of its current type. */
-        void forceStackTop(Type t) {
+        void forceStackTop(JCTree tree) {
             if (!alive) return;
+            Type t = tree.type;
             switch (t.getTag()) {
             case CLASS:
             case ARRAY:
                 int width = width(t);
                 Type old = stack[stacksize-width];
                 Assert.check(types.isSubtype(types.erasure(old),
-                                       types.erasure(t)));
+                                       types.erasure(t)), () -> "Type: " + types.erasure(old) + " is not subtype of: " + types.erasure(t) + " in tree: " + tree);
                 stack[stacksize-width] = t;
                 break;
             default:
@@ -2188,7 +2192,7 @@ public class Code {
     private int newLocal(int typecode) {
         int reg = nextreg;
         int w = width(typecode);
-        nextreg = reg + w;
+        nextreg = w > 0 ? reg + w : reg + 1;
         if (nextreg > max_locals) max_locals = nextreg;
         return reg;
     }
