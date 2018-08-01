@@ -28,11 +28,14 @@ package com.sun.tools.javac.comp;
 import com.sun.source.tree.LambdaExpressionTree.BodyKind;
 import com.sun.source.tree.NewClassTree;
 import com.sun.tools.javac.code.*;
+import com.sun.tools.javac.code.Type.ErrorType;
+import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.StructuralTypeMapping;
 import com.sun.tools.javac.code.Types.TypeMapping;
 import com.sun.tools.javac.comp.ArgumentAttr.LocalCacheContext;
 import com.sun.tools.javac.comp.Infer.GraphSolver.InferenceGraph;
 import com.sun.tools.javac.comp.Resolve.ResolveError;
+import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.resources.CompilerProperties.Fragments;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.util.*;
@@ -94,6 +97,7 @@ public class DeferredAttr extends JCTree.Visitor {
     final Flow flow;
     final Names names;
     final TypeEnvs typeEnvs;
+    final JavaCompiler compiler;
 
     public static DeferredAttr instance(Context context) {
         DeferredAttr instance = context.get(deferredAttrKey);
@@ -119,6 +123,7 @@ public class DeferredAttr extends JCTree.Visitor {
         names = Names.instance(context);
         stuckTree = make.Ident(names.empty).setType(Type.stuckType);
         typeEnvs = TypeEnvs.instance(context);
+        compiler = JavaCompiler.instance(context);
         emptyDeferredAttrContext =
             new DeferredAttrContext(AttrMode.CHECK, null, MethodResolutionPhase.BOX, infer.emptyContext, null, null) {
                 @Override
@@ -494,11 +499,14 @@ public class DeferredAttr extends JCTree.Visitor {
         Env<AttrContext> speculativeEnv = env.dup(newTree, env.info.dup(env.info.scope.dupUnshared(env.info.scope.owner)));
         speculativeEnv.info.isSpeculative = true;
         Log.DeferredDiagnosticHandler deferredDiagnosticHandler = diagHandlerCreator.apply(newTree);
+        boolean oldSkipAP = compiler.skipAnnotationProcessing;
         try {
+            compiler.skipAnnotationProcessing = true;
             attr.attribTree(newTree, speculativeEnv, resultInfo);
             return newTree;
         } finally {
             new UnenterScanner(env.toplevel.modle).scan(newTree);
+            compiler.skipAnnotationProcessing = oldSkipAP;
             log.popDiagnosticHandler(deferredDiagnosticHandler);
             if (localCache != null) {
                 localCache.leave();
@@ -856,7 +864,7 @@ public class DeferredAttr extends JCTree.Visitor {
                     boolean returnTypeIsVoid = currentReturnType.hasTag(VOID);
                     if (tree.getBodyKind() == BodyKind.EXPRESSION) {
                         boolean isExpressionCompatible = !returnTypeIsVoid ||
-                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody());
+                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody(), names);
                         if (!isExpressionCompatible) {
                             resultInfo.checkContext.report(tree.pos(),
                                 diags.fragment(Fragments.IncompatibleRetTypeInLambda(Fragments.MissingRetVal(currentReturnType))));
@@ -1041,6 +1049,8 @@ public class DeferredAttr extends JCTree.Visitor {
      */
     public class RecoveryDeferredTypeMap extends DeferredTypeMap {
 
+        private Type pt = null;
+
         public RecoveryDeferredTypeMap(AttrMode mode, Symbol msym, MethodResolutionPhase phase) {
             super(mode, msym, phase != null ? phase : MethodResolutionPhase.BOX);
         }
@@ -1052,6 +1062,28 @@ public class DeferredAttr extends JCTree.Visitor {
                         recover(dt) : owntype;
         }
 
+        @Override
+        public Type visitMethodType(Type.MethodType t, Void _unused) {
+            try {
+                if (t.hasTag(METHOD) && deferredAttrContext.mode == AttrMode.CHECK) {
+                    Type mtype = deferredAttrContext.msym.type;
+                    mtype = mtype.hasTag(ERROR) ? ((ErrorType)mtype).getOriginalType() : null;
+                    if (mtype != null && mtype.hasTag(METHOD)) {
+                        List<Type> argtypes1 = map(t.getParameterTypes(), mtype.getParameterTypes());
+                        Type restype1 = this.apply(t.getReturnType());
+                        List<Type> thrown1 = map(t.getThrownTypes(), mtype.getThrownTypes());
+                        if (argtypes1 == t.getParameterTypes() &&
+                            restype1 == t.getReturnType() &&
+                            thrown1 == t.getThrownTypes()) return t;
+                        else return new MethodType(argtypes1, restype1, thrown1, t.tsym);
+                    }
+                }
+                return super.visitMethodType(t, _unused);
+            } catch (AssertionError ae) {
+                return t;
+            }
+        }
+
         /**
          * Synthesize a type for a deferred type that hasn't been previously
          * reduced to an ordinary type. Functional deferred types and conditionals
@@ -1060,13 +1092,30 @@ public class DeferredAttr extends JCTree.Visitor {
          * a default expected type (j.l.Object).
          */
         private Type recover(DeferredType dt) {
-            dt.check(attr.new RecoveryInfo(deferredAttrContext) {
+            dt.check(pt != null ? attr.new RecoveryInfo(deferredAttrContext, pt) {
+                @Override
+                protected Type check(DiagnosticPosition pos, Type found) {
+                    return chk.checkNonVoid(pos, super.check(pos, found));
+                }
+            } : attr.new RecoveryInfo(deferredAttrContext) {
                 @Override
                 protected Type check(DiagnosticPosition pos, Type found) {
                     return chk.checkNonVoid(pos, super.check(pos, found));
                 }
             });
             return super.visit(dt);
+        }
+
+        private List<Type> map(List<Type> ts, List<Type> pts) {
+            if (ts.nonEmpty()) {
+                List<Type> tail1 = map(ts.tail, pts != null ? pts.tail : null);
+                pt = pts != null && pts.nonEmpty() ? pts.head : null;
+                Type t = this.apply(ts.head);
+                pt = null;
+                if (tail1 != ts.tail || t != ts.head)
+                    return tail1.prepend(t);
+            }
+            return ts;
         }
     }
 

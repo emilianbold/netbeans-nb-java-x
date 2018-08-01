@@ -48,7 +48,7 @@ import com.sun.javadoc.*;
  * @see Doc#tags()
  *
  */
-@Deprecated(since="9", forRemoval=true)
+@Deprecated
 @SuppressWarnings("removal")
 class TagImpl implements Tag {
 

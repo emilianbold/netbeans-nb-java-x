@@ -70,7 +70,7 @@ import com.sun.tools.javac.util.Name;
  *
  *  @author Neal Gafter
  */
-@Deprecated(since="9", forRemoval=true)
+@Deprecated
 @SuppressWarnings("removal")
 public class JavadocTool extends com.sun.tools.javac.main.JavaCompiler {
     DocEnv docenv;

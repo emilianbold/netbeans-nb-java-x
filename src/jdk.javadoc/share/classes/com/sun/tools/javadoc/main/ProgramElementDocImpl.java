@@ -55,7 +55,7 @@ import com.sun.tools.javac.util.Position;
  * @author Neal Gafter (rewrite)
  * @author Scott Seligman (generics, enums, annotations)
  */
-@Deprecated(since="9", forRemoval=true)
+@Deprecated
 @SuppressWarnings("removal")
 public abstract class ProgramElementDocImpl
         extends DocImpl implements ProgramElementDoc {
@@ -80,7 +80,7 @@ public abstract class ProgramElementDocImpl
     }
 
     @Override
-    void setTreePath(TreePath treePath) {
+    public void setTreePath(TreePath treePath) {
         super.setTreePath(treePath);
         this.tree = (JCTree) treePath.getLeaf();
         this.lineMap = ((JCCompilationUnit) treePath.getCompilationUnit()).lineMap;

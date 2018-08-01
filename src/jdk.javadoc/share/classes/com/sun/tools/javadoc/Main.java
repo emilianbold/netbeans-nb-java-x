@@ -48,7 +48,7 @@ import com.sun.tools.javadoc.main.Start;
  *
  * @since 1.4
  */
-@Deprecated(since="9", forRemoval=true)
+@Deprecated
 @SuppressWarnings("removal")
 public class Main {
 

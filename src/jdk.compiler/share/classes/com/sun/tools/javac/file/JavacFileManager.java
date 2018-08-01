@@ -27,8 +27,6 @@ package com.sun.tools.javac.file;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.module.Configuration;
-import java.lang.module.ModuleFinder;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -95,9 +93,10 @@ import static javax.tools.StandardLocation.*;
  */
 public class JavacFileManager extends BaseFileManager implements StandardJavaFileManager {
 
+    @SuppressWarnings("cast")
     public static char[] toArray(CharBuffer buffer) {
         if (buffer.hasArray())
-            return buffer.compact().flip().array();
+            return ((CharBuffer)buffer.compact().flip()).array();
         else
             return buffer.toString().toCharArray();
     }
@@ -975,19 +974,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
     @Override @DefinedBy(Api.COMPILER)
     public <S> ServiceLoader<S> getServiceLoader(Location location, Class<S> service) throws IOException {
-        nullCheck(location);
-        nullCheck(service);
-        getClass().getModule().addUses(service);
-        if (location.isModuleOrientedLocation()) {
-            Collection<Path> paths = locations.getLocation(location);
-            ModuleFinder finder = ModuleFinder.of(paths.toArray(new Path[paths.size()]));
-            ModuleLayer bootLayer = ModuleLayer.boot();
-            Configuration cf = bootLayer.configuration().resolveAndBind(ModuleFinder.of(), finder, Collections.emptySet());
-            ModuleLayer layer = bootLayer.defineModulesWithOneLoader(cf, ClassLoader.getSystemClassLoader());
-            return ServiceLoader.load(layer, service);
-        } else {
-            return ServiceLoader.load(service, getClassLoader(location));
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override @DefinedBy(Api.COMPILER)
