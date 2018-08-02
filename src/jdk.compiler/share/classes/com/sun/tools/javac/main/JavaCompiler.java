@@ -1877,6 +1877,7 @@ public class JavaCompiler {
     private Name parseAndGetName(JavaFileObject fo,
                                  Function<JCTree.JCCompilationUnit, Name> tree2Name) {
         DiagnosticHandler dh = new DiscardDiagnosticHandler(log);
+        JavaFileObject prev = log.useSource(fo);
         try {
             JCTree.JCCompilationUnit t = parse(fo, fo.getCharContent(false));
             return tree2Name.apply(t);
@@ -1884,6 +1885,7 @@ public class JavaCompiler {
             return null;
         } finally {
             log.popDiagnosticHandler(dh);
+            log.useSource(prev);
         }
     }
 
