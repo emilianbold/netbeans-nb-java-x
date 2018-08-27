@@ -2581,9 +2581,8 @@ public class ClassReader {
         int nameIndex = firstParam;
         int annotationIndex = 0;
         for (Type t: sym.type.getParameterTypes()) {
-            Name name = parameterName(nameIndex, paramNames);
-            paramNames = paramNames.prepend(name);
-            VarSymbol param = new VarSymbol(PARAMETER, name, t, sym);
+            VarSymbol param = createParameter(nameIndex, paramNames, t, sym);
+            paramNames = paramNames.prepend(param.name);
             params.append(param);
             if (parameterAnnotations != null) {
                 ParameterAnnotations annotations = parameterAnnotations[annotationIndex];
@@ -2608,16 +2607,16 @@ public class ClassReader {
     // Returns the name for the parameter at position 'index', either using
     // names read from the MethodParameters, or by synthesizing a name that
     // is not on the 'exclude' list.
-    private Name parameterName(int index, List<Name> exclude) {
+    private VarSymbol createParameter(int index, List<Name> exclude, Type t, Symbol owner) {
         if (parameterNameIndices != null && index < parameterNameIndices.length
                 && parameterNameIndices[index] != 0) {
-            return readName(parameterNameIndices[index]);
+            return new VarSymbol(PARAMETER, readName(parameterNameIndices[index]), t, owner);
         }
         String prefix = "arg";
         while (true) {
             Name argName = names.fromString(prefix + exclude.size());
             if (!exclude.contains(argName))
-                return argName;
+                return new ParamSymbol(PARAMETER, argName, t, owner);
             prefix += "$";
         }
     }
