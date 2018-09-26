@@ -71,6 +71,7 @@ import static com.sun.tools.javac.code.Kinds.*;
 import static com.sun.tools.javac.code.Kinds.Kind.*;
 import static com.sun.tools.javac.code.TypeTag.*;
 import static com.sun.tools.javac.code.TypeTag.WILDCARD;
+import com.sun.tools.javac.comp.Analyzer.AnalyzerMode;
 import static com.sun.tools.javac.tree.JCTree.Tag.*;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticFlag;
 
@@ -399,7 +400,10 @@ public class Attr extends JCTree.Visitor {
     public Env<AttrContext> attribExprToTree(JCTree expr, Env<AttrContext> env, JCTree tree) {
         Env<AttrContext> localEnv = env.dup(env.tree, env.info.dup(env.info.scope.dupUnshared()));
         breakTree = tree;
+        JavaFileObject prev = log.useSource(env.toplevel.sourcefile);
+        EnumSet<AnalyzerMode> analyzerModes = EnumSet.copyOf(analyzer.analyzerModes);
         try {
+            analyzer.analyzerModes.clear();
             attribExpr(expr, localEnv);
         } catch (BreakAttr b) {
             return b.env;
@@ -411,6 +415,8 @@ public class Attr extends JCTree.Visitor {
             }
         } finally {
             breakTree = null;
+            log.useSource(prev);
+            analyzer.analyzerModes.addAll(analyzerModes);
         }
         return localEnv;
     }
@@ -418,7 +424,10 @@ public class Attr extends JCTree.Visitor {
     public Env<AttrContext> attribStatToTree(JCTree stmt, Env<AttrContext> env, JCTree tree) {
         Env<AttrContext> localEnv = env.dup(env.tree, env.info.dup(env.info.scope.dupUnshared()));
         breakTree = tree;
+        JavaFileObject prev = log.useSource(env.toplevel.sourcefile);
+        EnumSet<AnalyzerMode> analyzerModes = EnumSet.copyOf(analyzer.analyzerModes);
         try {
+            analyzer.analyzerModes.clear();
             attribStat(stmt, localEnv);
         } catch (BreakAttr b) {
             return b.env;
@@ -430,6 +439,8 @@ public class Attr extends JCTree.Visitor {
             }
         } finally {
             breakTree = null;
+            log.useSource(prev);
+            analyzer.analyzerModes.addAll(analyzerModes);
         }
         return localEnv;
     }
@@ -2896,7 +2907,7 @@ public class Attr extends JCTree.Visitor {
                     JCLambda lambda = (JCLambda)tree;
                     List<Type> argtypes = List.nil();
                     for (JCVariableDecl param : lambda.params) {
-                        argtypes = param.vartype != null ?
+                        argtypes = param.vartype != null && param.vartype.type != null ?
                                 argtypes.append(param.vartype.type) :
                                 argtypes.append(syms.errType);
                     }
