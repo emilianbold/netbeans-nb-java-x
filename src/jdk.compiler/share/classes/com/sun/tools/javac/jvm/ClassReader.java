@@ -2801,7 +2801,7 @@ public class ClassReader {
         if (majorVersion > maxMajor ||
             majorVersion * 1000 + minorVersion <
             Version.MIN().major * 1000 + Version.MIN().minor) {
-            if (majorVersion == (maxMajor + 1))
+            if (majorVersion == (maxMajor + 1) || true/*nb-javac, accept any classfile version*/)
                 log.warning(Warnings.BigMajorVersion(currentClassFile,
                                                      majorVersion,
                                                      maxMajor));
