@@ -275,6 +275,10 @@ public class Arguments {
         return fileObjects;
     }
 
+    public void initFileObjects(Set<JavaFileObject> fos) {
+        fileObjects = fos;
+    }
+
     /**
      * Gets the classes to be subject to annotation processing.
      * @return the classes to be subject to annotation processing
@@ -440,29 +444,6 @@ public class Arguments {
                     ex.printStackTrace(log.getWriter(WriterKind.NOTICE));
                     return false;
                 }
-            }
-        }
-
-        if (isEmpty()) {
-            // It is allowed to compile nothing if just asking for help or version info.
-            // But also note that none of these options are supported in API mode.
-            if (options.isSet(Option.HELP)
-                    || options.isSet(Option.X)
-                    || options.isSet(Option.VERSION)
-                    || options.isSet(Option.FULLVERSION)
-                    || options.isSet(Option.MODULE)) {
-                return true;
-            }
-
-            if (!emptyAllowed) {
-                if (!errors) {
-                    if (JavaCompiler.explicitAnnotationProcessingRequested(options)) {
-                        reportDiag(Errors.NoSourceFilesClasses);
-                    } else {
-                        reportDiag(Errors.NoSourceFiles);
-                    }
-                }
-                return false;
             }
         }
 

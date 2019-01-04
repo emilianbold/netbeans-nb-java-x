@@ -63,6 +63,6 @@ public interface BreakTree extends StatementTree {
      * is removed.
      *
      */
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     ExpressionTree getValue();
 }

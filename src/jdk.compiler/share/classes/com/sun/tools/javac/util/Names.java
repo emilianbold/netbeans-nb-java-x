@@ -78,6 +78,7 @@ public class Names {
     // field and method names
     public final Name _name;
     public final Name addSuppressed;
+    public final Name addSuppressedException;
     public final Name any;
     public final Name append;
     public final Name clinit;
@@ -208,8 +209,7 @@ public class Names {
     public final Name.Table table;
 
     public Names(Context context) {
-        Options options = Options.instance(context);
-        table = createTable(options);
+        table = createTable(context);
 
         // operators and punctuation
         asterisk = fromString("*");
@@ -242,6 +242,7 @@ public class Names {
         // field and method names
         _name = fromString("name");
         addSuppressed = fromString("addSuppressed");
+        addSuppressedException = fromString("addSuppressedException");
         any = fromString("<any>");
         append = fromString("append");
         clinit = fromString("<clinit>");
@@ -370,12 +371,13 @@ public class Names {
         makeConcatWithConstants = fromString("makeConcatWithConstants");
     }
 
-    protected Name.Table createTable(Options options) {
+    protected Name.Table createTable(Context context) {
+        Options options = Options.instance(context);
         boolean useUnsharedTable = options.isSet("useUnsharedTable");
         if (useUnsharedTable)
-            return UnsharedNameTable.create(this);
+            return UnsharedNameTable.create(this, context);
         else
-            return SharedNameTable.create(this);
+            return SharedNameTable.create(this, context);
     }
 
     public void dispose() {

@@ -45,7 +45,7 @@ import java.util.List;
  * which are part of a preview feature and may be removed
  * if the preview feature is removed.
  */
-@Deprecated(forRemoval=true, since="12")
+@Deprecated()
 public interface SwitchExpressionTree extends ExpressionTree {
     /**
      * Returns the expression for the {@code switch} expression.

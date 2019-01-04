@@ -49,7 +49,7 @@ import com.sun.tools.javac.main.JavaCompiler;
  *
  *  @author Neal Gafter
  */
-@Deprecated(since="9", forRemoval=true)
+@Deprecated
 @SuppressWarnings("removal")
 public class JavadocEnter extends Enter {
     public static JavadocEnter instance(Context context) {
@@ -87,7 +87,7 @@ public class JavadocEnter extends Enter {
     @Override
     public void visitTopLevel(JCCompilationUnit tree) {
         super.visitTopLevel(tree);
-        if (tree.sourcefile.isNameCompatible("package-info", JavaFileObject.Kind.SOURCE)) {
+        if (tree.sourcefile.isNameCompatible("package-info", JavaFileObject.Kind.SOURCE) && !isShadowed()) {
             JCPackageDecl pd = tree.getPackage();
             TreePath tp = pd == null ? docenv.getTreePath(tree) : docenv.getTreePath(tree, pd);
             docenv.makePackageDoc(tree.packge, tp);
@@ -97,7 +97,7 @@ public class JavadocEnter extends Enter {
     @Override
     public void visitClassDef(JCClassDecl tree) {
         super.visitClassDef(tree);
-        if (tree.sym == null) return;
+        if (tree.sym == null || isShadowed()) return;
         if (tree.sym.kind == TYP || tree.sym.kind == ERR) {
             ClassSymbol c = tree.sym;
             docenv.makeClassDoc(c, docenv.getTreePath(env.toplevel, tree));

@@ -33,6 +33,7 @@ import java.util.Queue;
 import java.util.function.Predicate;
 
 import com.sun.source.tree.LambdaExpressionTree;
+import com.sun.source.tree.ModifiersTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Kinds.Kind;
@@ -44,6 +45,7 @@ import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.ArgumentAttr.LocalCacheContext;
 import com.sun.tools.javac.resources.CompilerProperties.Warnings;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCDoWhileLoop;
@@ -54,6 +56,7 @@ import com.sun.tools.javac.tree.JCTree.JCLambda;
 import com.sun.tools.javac.tree.JCTree.JCLambda.ParameterKind;
 import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
+import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.tree.JCTree.JCNewClass;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.tree.JCTree.JCSwitch;
@@ -244,26 +247,32 @@ public class Analyzer {
         @Override
         void process(JCNewClass oldTree, JCNewClass newTree, boolean hasErrors) {
             if (!hasErrors) {
-                List<Type> inferredArgs, explicitArgs;
+                Type oldType = null;
+                Type newType = null;
                 if (oldTree.def != null) {
-                    inferredArgs = newTree.def.implementing.nonEmpty()
-                                      ? newTree.def.implementing.get(0).type.getTypeArguments()
-                                      : newTree.def.extending.type.getTypeArguments();
-                    explicitArgs = oldTree.def.implementing.nonEmpty()
-                                      ? oldTree.def.implementing.get(0).type.getTypeArguments()
-                                      : oldTree.def.extending.type.getTypeArguments();
+                    newType = newTree.def.implementing.nonEmpty()
+                                      ? newTree.def.implementing.get(0).type
+                                      : newTree.def.extending.type;
+                    oldType = oldTree.def.implementing.nonEmpty()
+                                      ? oldTree.def.implementing.get(0).type
+                                      : oldTree.def.extending.type;
                 } else {
-                    inferredArgs = newTree.type.getTypeArguments();
-                    explicitArgs = oldTree.type.getTypeArguments();
+                    newType = newTree.type;
+                    oldType = oldTree.type;
                 }
-                for (Type t : inferredArgs) {
-                    if (!types.isSameType(t, explicitArgs.head)) {
-                        return;
+                if (oldType != null && !oldType.isErroneous()
+                        && newType != null && !newType.isErroneous()) {
+                    List<Type> explicitArgs = oldType.getTypeArguments();
+                    List<Type> inferredArgs = newType.getTypeArguments();
+                    for (Type t : inferredArgs) {
+                        if (t == null || explicitArgs.head == null || !types.isSameType(t, explicitArgs.head)) {
+                            return;
+                        }
+                        explicitArgs = explicitArgs.tail;
                     }
-                    explicitArgs = explicitArgs.tail;
+                    //exact match
+                    log.warning(oldTree.clazz, Warnings.DiamondRedundantArgs);
                 }
-                //exact match
-                log.warning(oldTree.clazz, Warnings.DiamondRedundantArgs);
             }
         }
     }
@@ -280,10 +289,11 @@ public class Analyzer {
         @Override
         boolean match (JCNewClass tree){
             Type clazztype = tree.clazz.type;
-            return tree.def != null &&
+            return tree.def != null && clazztype != null &&
                     clazztype.hasTag(CLASS) &&
                     types.isFunctionalInterface(clazztype.tsym) &&
-                    decls(tree.def).length() == 1;
+                    decls(tree.def).length() == 1
+                    && decls(tree.def).head.hasTag(METHODDEF);
         }
         //where
             private List<JCTree> decls(JCClassDecl decl) {
@@ -751,6 +761,13 @@ public class Analyzer {
                 newNewClazz.args = newNewClazz.args.tail;
             }
             return newNewClazz;
+        }
+
+        @Override @DefinedBy(Api.COMPILER_TREE)
+        public JCTree visitModifiers(ModifiersTree node, Void _unused) {
+            JCModifiers t = (JCModifiers) node;
+            List<JCAnnotation> annotations = copy(t.annotations, _unused);
+            return make.at(t.pos).Modifiers(t.flags & ~Flags.AccessFlags, annotations);
         }
     }
 

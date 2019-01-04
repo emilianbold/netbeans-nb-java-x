@@ -34,6 +34,7 @@ import java.util.*;
 import com.sun.tools.javac.code.Source.Feature;
 import com.sun.tools.javac.util.DefinedBy;
 import com.sun.tools.javac.util.DefinedBy.Api;
+import java.lang.reflect.Method;
 
 /**
  * Object providing state about a prior round of annotation processing.
@@ -292,7 +293,16 @@ public class JavacRoundEnvironment implements RoundEnvironment {
         if (annotationElement != null)
             return annotationElement;
         else if (allowModules) {
-            String moduleName = Objects.requireNonNullElse(annotation.getModule().getName(), "");
+            String moduleName = "";
+            try {
+                Method mth = annotation.getClass().getDeclaredMethod("getModule");
+                if (mth != null) {
+                    Object retObj = mth.invoke(annotation);
+                    if (retObj instanceof String) {
+                        moduleName = (String) retObj;
+                    }
+                }
+            } catch (Exception e) {}
             return eltUtils.getTypeElement(eltUtils.getModuleElement(moduleName), name);
         } else {
             return null;

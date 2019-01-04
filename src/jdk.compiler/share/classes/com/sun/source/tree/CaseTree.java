@@ -65,7 +65,7 @@ public interface CaseTree extends Tree {
      * which is part of a preview feature and may be removed
      * if the preview feature is removed.
      */
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     List<? extends ExpressionTree> getExpressions();
 
     /**
@@ -90,7 +90,7 @@ public interface CaseTree extends Tree {
      * which is part of a preview feature and may be removed
      * if the preview feature is removed.
      */
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     public default Tree getBody() {
         return null;
     }
@@ -105,7 +105,7 @@ public interface CaseTree extends Tree {
      * which is part of a preview feature and may be removed
      * if the preview feature is removed.
      */
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     public default CaseKind getCaseKind() {
         return CaseKind.STATEMENT;
     }
@@ -123,7 +123,7 @@ public interface CaseTree extends Tree {
      * which is part of a preview feature and may be removed
      * if the preview feature is removed.
      */
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     public enum CaseKind {
         /**
          * Case is in the form: {@code case <expression>: <statements>}.

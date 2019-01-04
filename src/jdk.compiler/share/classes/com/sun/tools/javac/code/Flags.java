@@ -319,6 +319,9 @@ public class Flags {
      */
     public static final long BODY_ONLY_FINALIZE = 1L<<17; //blocks only
 
+    public static final long FROMCLASS = 1L<<61;
+    public static final long APT_CLEANED = 1L<<62;
+
     /** Modifier masks.
      */
     public static final int

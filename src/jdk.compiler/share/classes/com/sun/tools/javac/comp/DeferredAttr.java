@@ -35,6 +35,7 @@ import com.sun.tools.javac.code.Types.TypeMapping;
 import com.sun.tools.javac.comp.ArgumentAttr.LocalCacheContext;
 import com.sun.tools.javac.comp.Infer.GraphSolver.InferenceGraph;
 import com.sun.tools.javac.comp.Resolve.ResolveError;
+import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.resources.CompilerProperties.Fragments;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.util.*;
@@ -97,6 +98,7 @@ public class DeferredAttr extends JCTree.Visitor {
     final Flow flow;
     final Names names;
     final TypeEnvs typeEnvs;
+    final JavaCompiler compiler;
 
     public static DeferredAttr instance(Context context) {
         DeferredAttr instance = context.get(deferredAttrKey);
@@ -122,6 +124,7 @@ public class DeferredAttr extends JCTree.Visitor {
         names = Names.instance(context);
         stuckTree = make.Ident(names.empty).setType(Type.stuckType);
         typeEnvs = TypeEnvs.instance(context);
+        compiler = JavaCompiler.instance(context);
         emptyDeferredAttrContext =
             new DeferredAttrContext(AttrMode.CHECK, null, MethodResolutionPhase.BOX, infer.emptyContext, null, null) {
                 @Override
@@ -497,11 +500,14 @@ public class DeferredAttr extends JCTree.Visitor {
         Env<AttrContext> speculativeEnv = env.dup(newTree, env.info.dup(env.info.scope.dupUnshared(env.info.scope.owner)));
         speculativeEnv.info.isSpeculative = true;
         Log.DeferredDiagnosticHandler deferredDiagnosticHandler = diagHandlerCreator.apply(newTree);
+        boolean oldSkipAP = compiler.skipAnnotationProcessing;
         try {
+            compiler.skipAnnotationProcessing = true;
             attr.attribTree(newTree, speculativeEnv, resultInfo);
             return newTree;
         } finally {
             new UnenterScanner(env.toplevel.modle).scan(newTree);
+            compiler.skipAnnotationProcessing = oldSkipAP;
             log.popDiagnosticHandler(deferredDiagnosticHandler);
             if (localCache != null) {
                 localCache.leave();
@@ -859,7 +865,7 @@ public class DeferredAttr extends JCTree.Visitor {
                     boolean returnTypeIsVoid = currentReturnType.hasTag(VOID);
                     if (tree.getBodyKind() == BodyKind.EXPRESSION) {
                         boolean isExpressionCompatible = !returnTypeIsVoid ||
-                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody());
+                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody(), names);
                         if (!isExpressionCompatible) {
                             resultInfo.checkContext.report(tree.pos(),
                                 diags.fragment(Fragments.IncompatibleRetTypeInLambda(Fragments.MissingRetVal(currentReturnType))));
@@ -1043,6 +1049,8 @@ public class DeferredAttr extends JCTree.Visitor {
      * (the latter step is useful in a recovery scenario).
      */
     public class RecoveryDeferredTypeMap extends DeferredTypeMap<Type> {
+
+        private Type pt = null;
 
         public RecoveryDeferredTypeMap(AttrMode mode, Symbol msym, MethodResolutionPhase phase) {
             super(mode, msym, phase != null ? phase : MethodResolutionPhase.BOX);

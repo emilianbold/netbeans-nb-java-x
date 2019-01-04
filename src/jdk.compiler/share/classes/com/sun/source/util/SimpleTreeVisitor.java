@@ -276,7 +276,7 @@ public class SimpleTreeVisitor <R,P> implements TreeVisitor<R,P> {
      * if the preview feature is removed.
      */
     @Override
-    @Deprecated(forRemoval=true, since="12")
+    @Deprecated()
     @SuppressWarnings("removal")
     public R visitSwitchExpression(SwitchExpressionTree node, P p) {
         return defaultAction(node, p);

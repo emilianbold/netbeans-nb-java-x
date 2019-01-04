@@ -86,6 +86,8 @@ public class JavaTokenizer {
 
     protected ScannerFactory fac;
 
+    int seek;
+
     private static final boolean hexFloatsWork = hexFloatsWork();
     private static boolean hexFloatsWork() {
         try {
@@ -139,13 +141,13 @@ public class JavaTokenizer {
     /** Report an error at the given position using the provided arguments.
      */
     protected void lexError(int pos, JCDiagnostic.Error key) {
-        log.error(pos, key);
+        log.error(seek + pos, key);
         tk = TokenKind.ERROR;
         errPos = pos;
     }
 
     protected void lexError(DiagnosticFlag flags, int pos, JCDiagnostic.Error key) {
-        log.error(flags, pos, key);
+        log.error(flags, seek + pos, key);
         tk = TokenKind.ERROR;
         errPos = pos;
     }
@@ -746,10 +748,10 @@ public class JavaTokenizer {
             }
             endPos = reader.bp;
             switch (tk.tag) {
-                case DEFAULT: return new Token(tk, pos, endPos, comments);
-                case NAMED: return new NamedToken(tk, pos, endPos, name, comments);
-                case STRING: return new StringToken(tk, pos, endPos, reader.chars(), comments);
-                case NUMERIC: return new NumericToken(tk, pos, endPos, reader.chars(), radix, comments);
+                case DEFAULT: return new Token(tk, seek + pos, seek + endPos, comments);
+                case NAMED: return new NamedToken(tk, seek + pos, seek + endPos, name, comments);
+                case STRING: return new StringToken(tk, seek + pos, seek + endPos, reader.chars(), comments);
+                case NUMERIC: return new NumericToken(tk, seek + pos, seek + endPos, reader.chars(), radix, comments);
                 default: throw new AssertionError();
             }
         }
@@ -772,13 +774,13 @@ public class JavaTokenizer {
     /** Return the position where a lexical error occurred;
      */
     public int errPos() {
-        return errPos;
+        return errPos == Position.NOPOS ? errPos : seek + errPos;
     }
 
     /** Set the position where a lexical error occurred;
      */
     public void errPos(int pos) {
-        errPos = pos;
+        errPos = pos == Position.NOPOS ? pos: pos - seek;
     }
 
     /**
@@ -823,7 +825,8 @@ public class JavaTokenizer {
      *
      * @return a LineMap */
     public Position.LineMap getLineMap() {
-        return Position.makeLineMap(reader.getRawCharacters(), reader.buflen, false);
+        char[] buf = reader.getRawCharacters();
+        return Position.makeLineMap(buf, buf.length, false);
     }
 
 
