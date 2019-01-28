@@ -2720,7 +2720,6 @@ public class Attr extends JCTree.Visitor {
                 // prefix it to the constructor arguments
                 // "encl" will be cleared in TransTypes
                 if (tree.encl != null && !clazztype.tsym.isInterface()) {
-                    tree.args = tree.args.prepend(makeNullCheck(tree.encl));
                     finalargtypes = argtypes.prepend(tree.encl.type);
                 } else {
                     finalargtypes = argtypes;

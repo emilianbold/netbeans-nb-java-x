@@ -1783,7 +1783,7 @@ public abstract class JCTree implements Tree, Cloneable, DiagnosticPosition {
         public JCExpression getIdentifier() { return clazz; }
         @DefinedBy(Api.COMPILER_TREE)
         public List<JCExpression> getArguments() {
-            return encl != null && def != null ? args.tail : args;
+            return args;
         }
         @DefinedBy(Api.COMPILER_TREE)
         public JCClassDecl getClassBody() { return def; }
