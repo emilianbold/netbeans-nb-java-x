@@ -921,6 +921,7 @@ public class Flow {
                         pendingExits.append(new ThrownPendingExit(tree, exc));
                     }
                 }
+                thrown = chk.incl(exc, thrown);
             }
         }
 
