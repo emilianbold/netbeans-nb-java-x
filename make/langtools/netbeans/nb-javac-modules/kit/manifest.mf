@@ -2,5 +2,5 @@ Manifest-Version: 1.0
 AutoUpdate-Show-In-Client: true
 OpenIDE-Module: org.netbeans.modules.nbjavac/1
 OpenIDE-Module-Localizing-Bundle: org/netbeans/modules/nbjavac/Bundle.properties
-OpenIDE-Module-Specification-Version: 1.51
+OpenIDE-Module-Specification-Version: 1.6
 
