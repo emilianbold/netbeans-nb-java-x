@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,7 +47,15 @@ ClassListParser::ClassListParser(const char* file) {
   assert(_instance == NULL, "must be singleton");
   _instance = this;
   _classlist_file = file;
-  _file = fopen(file, "r");
+  _file = NULL;
+  // Use os::open() because neither fopen() nor os::fopen()
+  // can handle long path name on Windows.
+  int fd = os::open(file, O_RDONLY, S_IREAD);
+  if (fd != -1) {
+    // Obtain a File* from the file descriptor so that fgets()
+    // can be used in parse_one_line()
+    _file = os::open(fd, "r");
+  }
   if (_file == NULL) {
     char errmsg[JVM_MAXPATHLEN];
     os::lasterror(errmsg, JVM_MAXPATHLEN);
@@ -287,13 +295,13 @@ InstanceKlass* ClassListParser::load_class_from_source(Symbol* class_name, TRAPS
   if (!is_id_specified()) {
     error("If source location is specified, id must be also specified");
   }
-  InstanceKlass* k = ClassLoaderExt::load_class(class_name, _source, CHECK_NULL);
-
   if (strncmp(_class_name, "java/", 5) == 0) {
     log_info(cds)("Prohibited package for non-bootstrap classes: %s.class from %s",
           _class_name, _source);
     return NULL;
   }
+
+  InstanceKlass* k = ClassLoaderExt::load_class(class_name, _source, CHECK_NULL);
 
   if (k != NULL) {
     if (k->local_interfaces()->length() != _interfaces->length()) {
@@ -318,8 +326,7 @@ InstanceKlass* ClassListParser::load_class_from_source(Symbol* class_name, TRAPS
 }
 
 Klass* ClassListParser::load_current_class(TRAPS) {
-  TempNewSymbol class_name_symbol = SymbolTable::new_symbol(_class_name, THREAD);
-  guarantee(!HAS_PENDING_EXCEPTION, "Exception creating a symbol.");
+  TempNewSymbol class_name_symbol = SymbolTable::new_symbol(_class_name);
 
   Klass *klass = NULL;
   if (!is_loading_from_source()) {
@@ -454,4 +461,3 @@ InstanceKlass* ClassListParser::lookup_interface_for_current_class(Symbol* inter
   ShouldNotReachHere();
   return NULL;
 }
-

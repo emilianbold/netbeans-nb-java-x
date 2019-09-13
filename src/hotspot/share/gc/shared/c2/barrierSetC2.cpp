@@ -75,6 +75,7 @@ Node* BarrierSetC2::store_at_resolved(C2Access& access, C2AccessValue& val) cons
 
   bool mismatched = (decorators & C2_MISMATCHED) != 0;
   bool unaligned = (decorators & C2_UNALIGNED) != 0;
+  bool unsafe = (decorators & C2_UNSAFE_ACCESS) != 0;
   bool requires_atomic_access = (decorators & MO_UNORDERED) == 0;
 
   bool in_native = (decorators & IN_NATIVE) != 0;
@@ -93,7 +94,7 @@ Node* BarrierSetC2::store_at_resolved(C2Access& access, C2AccessValue& val) cons
     }
 
     store = kit->store_to_memory(kit->control(), access.addr().node(), val.node(), access.type(),
-                                     access.addr().type(), mo, requires_atomic_access, unaligned, mismatched);
+                                     access.addr().type(), mo, requires_atomic_access, unaligned, mismatched, unsafe);
     access.set_raw_access(store);
   } else {
     assert(!requires_atomic_access, "not yet supported");
@@ -131,12 +132,13 @@ Node* BarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) con
   bool requires_atomic_access = (decorators & MO_UNORDERED) == 0;
   bool unaligned = (decorators & C2_UNALIGNED) != 0;
   bool control_dependent = (decorators & C2_CONTROL_DEPENDENT_LOAD) != 0;
-  bool pinned = (decorators & C2_PINNED_LOAD) != 0;
+  bool unknown_control = (decorators & C2_UNKNOWN_CONTROL_LOAD) != 0;
+  bool unsafe = (decorators & C2_UNSAFE_ACCESS) != 0;
 
   bool in_native = (decorators & IN_NATIVE) != 0;
 
   MemNode::MemOrd mo = access.mem_node_mo();
-  LoadNode::ControlDependency dep = pinned ? LoadNode::Pinned : LoadNode::DependsOnlyOnTest;
+  LoadNode::ControlDependency dep = unknown_control ? LoadNode::UnknownControl : LoadNode::DependsOnlyOnTest;
 
   Node* load;
   if (access.is_parse_access()) {
@@ -148,7 +150,7 @@ Node* BarrierSetC2::load_at_resolved(C2Access& access, const Type* val_type) con
       load = kit->make_load(control, adr, val_type, access.type(), mo);
     } else {
       load = kit->make_load(control, adr, val_type, access.type(), adr_type, mo,
-                            dep, requires_atomic_access, unaligned, mismatched);
+                            dep, requires_atomic_access, unaligned, mismatched, unsafe);
     }
     access.set_raw_access(load);
   } else {
@@ -347,7 +349,7 @@ void C2Access::fixup_decorators() {
     // To be valid, unsafe loads may depend on other conditions than
     // the one that guards them: pin the Load node
     _decorators |= C2_CONTROL_DEPENDENT_LOAD;
-    _decorators |= C2_PINNED_LOAD;
+    _decorators |= C2_UNKNOWN_CONTROL_LOAD;
     const TypePtr* adr_type = _addr.type();
     Node* adr = _addr.node();
     if (!needs_cpu_membar() && adr_type->isa_instptr()) {
@@ -359,7 +361,7 @@ void C2Access::fixup_decorators() {
         if (offset < s) {
           // Guaranteed to be a valid access, no need to pin it
           _decorators ^= C2_CONTROL_DEPENDENT_LOAD;
-          _decorators ^= C2_PINNED_LOAD;
+          _decorators ^= C2_UNKNOWN_CONTROL_LOAD;
         }
       }
     }

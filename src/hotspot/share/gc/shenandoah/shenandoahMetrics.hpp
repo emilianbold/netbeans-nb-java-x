@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP
 
 #include "gc/shenandoah/shenandoahHeap.hpp"
 
@@ -47,9 +47,8 @@ public:
 
   void snap_before();
   void snap_after();
-  void print();
 
-  bool is_good_progress(const char *label);
+  bool is_good_progress();
 };
 
-#endif //SHARE_VM_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHMETRICS_HPP

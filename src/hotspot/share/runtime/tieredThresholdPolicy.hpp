@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP
-#define SHARE_VM_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP
+#ifndef SHARE_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP
+#define SHARE_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP
 
 #include "code/nmethod.hpp"
 #include "oops/methodData.hpp"
@@ -231,7 +231,9 @@ protected:
   virtual void submit_compile(const methodHandle& mh, int bci, CompLevel level, JavaThread* thread);
   // Simple methods are as good being compiled with C1 as C2.
   // This function tells if it's such a function.
-  inline bool is_trivial(Method* method);
+  inline static bool is_trivial(Method* method);
+  // Force method to be compiled at CompLevel_simple?
+  inline static bool should_compile_at_level_simple(Method* method);
 
   // Predicate helpers are used by .*_predicate() methods as well as others.
   // They check the given counter values, multiplied by the scale against the thresholds.
@@ -274,4 +276,4 @@ public:
 
 #endif // TIERED
 
-#endif // SHARE_VM_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP
+#endif // SHARE_RUNTIME_TIEREDTHRESHOLDPOLICY_HPP

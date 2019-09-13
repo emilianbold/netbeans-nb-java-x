@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_RUNTIME_THREADSMR_HPP
-#define SHARE_VM_RUNTIME_THREADSMR_HPP
+#ifndef SHARE_RUNTIME_THREADSMR_HPP
+#define SHARE_RUNTIME_THREADSMR_HPP
 
 #include "memory/allocation.hpp"
 #include "runtime/timer.hpp"
@@ -86,6 +86,7 @@ class ThreadClosure;
 // SMR Support for the Threads class.
 //
 class ThreadsSMRSupport : AllStatic {
+  friend class VMStructs;
   friend class SafeThreadsListPtr;  // for _nested_thread_list_max, delete_notify(), release_stable_list_wake_up() access
 
   // The coordination between ThreadsSMRSupport::release_stable_list() and
@@ -158,6 +159,7 @@ class ThreadsSMRSupport : AllStatic {
 // A fast list of JavaThreads.
 //
 class ThreadsList : public CHeapObj<mtThread> {
+  friend class VMStructs;
   friend class SafeThreadsListPtr;  // for {dec,inc}_nested_handle_cnt() access
   friend class ThreadsSMRSupport;  // for _nested_handle_cnt, {add,remove}_thread(), {,set_}next_list() access
 
@@ -372,4 +374,4 @@ public:
   }
 };
 
-#endif // SHARE_VM_RUNTIME_THREADSMR_HPP
+#endif // SHARE_RUNTIME_THREADSMR_HPP

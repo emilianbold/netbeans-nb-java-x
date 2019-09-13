@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,15 +22,14 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHARED_SPACE_INLINE_HPP
-#define SHARE_VM_GC_SHARED_SPACE_INLINE_HPP
+#ifndef SHARE_GC_SHARED_SPACE_INLINE_HPP
+#define SHARE_GC_SHARED_SPACE_INLINE_HPP
 
 #include "gc/shared/blockOffsetTable.inline.hpp"
 #include "gc/shared/collectedHeap.hpp"
 #include "gc/shared/generation.hpp"
 #include "gc/shared/space.hpp"
 #include "gc/shared/spaceDecorator.hpp"
-#include "memory/universe.hpp"
 #include "oops/oopsHierarchy.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/prefetch.inline.hpp"
@@ -388,4 +387,4 @@ void ContiguousSpace::par_oop_iterate(MemRegion mr, OopClosureType* blk) {
   }
 }
 
-#endif // SHARE_VM_GC_SHARED_SPACE_INLINE_HPP
+#endif // SHARE_GC_SHARED_SPACE_INLINE_HPP

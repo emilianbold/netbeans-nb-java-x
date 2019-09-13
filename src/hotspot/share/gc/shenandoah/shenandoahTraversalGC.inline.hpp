@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP
 
 #include "gc/shenandoah/shenandoahAsserts.hpp"
 #include "gc/shenandoah/shenandoahBarrierSet.inline.hpp"
@@ -32,6 +32,7 @@
 #include "gc/shenandoah/shenandoahTraversalGC.hpp"
 #include "gc/shenandoah/shenandoahTaskqueue.hpp"
 #include "gc/shenandoah/shenandoahTaskqueue.inline.hpp"
+#include "oops/compressedOops.inline.hpp"
 #include "oops/oop.inline.hpp"
 
 template <class T, bool STRING_DEDUP, bool DEGEN>
@@ -53,7 +54,7 @@ void ShenandoahTraversalGC::process_oop(T* p, Thread* thread, ShenandoahObjToSca
       }
       shenandoah_assert_forwarded_except(p, obj, _heap->cancelled_gc());
       // Update reference.
-      _heap->atomic_compare_exchange_oop(forw, p, obj);
+      ShenandoahHeap::cas_oop(forw, p, obj);
       obj = forw;
     }
 
@@ -74,4 +75,4 @@ void ShenandoahTraversalGC::process_oop(T* p, Thread* thread, ShenandoahObjToSca
   }
 }
 
-#endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHTRAVERSALGC_INLINE_HPP

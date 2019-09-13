@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -227,6 +227,7 @@ class LibraryCallKit : public GraphKit {
   bool runtime_math(const TypeFunc* call_type, address funcAddr, const char* funcName);
   bool inline_math_native(vmIntrinsics::ID id);
   bool inline_math(vmIntrinsics::ID id);
+  bool inline_double_math(vmIntrinsics::ID id);
   template <typename OverflowOp>
   bool inline_math_overflow(Node* arg1, Node* arg2);
   void inline_math_mathExact(Node* math, Node* test);
@@ -325,6 +326,7 @@ class LibraryCallKit : public GraphKit {
   bool inline_vectorizedMismatch();
   bool inline_fma(vmIntrinsics::ID id);
   bool inline_character_compare(vmIntrinsics::ID id);
+  bool inline_fp_min_max(vmIntrinsics::ID id);
 
   bool inline_profileBoolean();
   bool inline_isCompileConstant();
@@ -532,6 +534,9 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_dcos:
   case vmIntrinsics::_dtan:
   case vmIntrinsics::_dabs:
+  case vmIntrinsics::_fabs:
+  case vmIntrinsics::_iabs:
+  case vmIntrinsics::_labs:
   case vmIntrinsics::_datan2:
   case vmIntrinsics::_dsqrt:
   case vmIntrinsics::_dexp:
@@ -873,6 +878,12 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_isUpperCase:
   case vmIntrinsics::_isWhitespace:
     return inline_character_compare(intrinsic_id());
+
+  case vmIntrinsics::_maxF:
+  case vmIntrinsics::_minF:
+  case vmIntrinsics::_maxD:
+  case vmIntrinsics::_minD:
+    return inline_fp_min_max(intrinsic_id());
 
   default:
     // If you get here, it may be that someone has added a new intrinsic
@@ -1786,12 +1797,29 @@ Node* LibraryCallKit::round_double_node(Node* n) {
 // public static double Math.sqrt(double)
 // public static double Math.log(double)
 // public static double Math.log10(double)
-bool LibraryCallKit::inline_math(vmIntrinsics::ID id) {
+bool LibraryCallKit::inline_double_math(vmIntrinsics::ID id) {
   Node* arg = round_double_node(argument(0));
   Node* n = NULL;
   switch (id) {
   case vmIntrinsics::_dabs:   n = new AbsDNode(                arg);  break;
   case vmIntrinsics::_dsqrt:  n = new SqrtDNode(C, control(),  arg);  break;
+  default:  fatal_unexpected_iid(id);  break;
+  }
+  set_result(_gvn.transform(n));
+  return true;
+}
+
+//------------------------------inline_math-----------------------------------
+// public static float Math.abs(float)
+// public static int Math.abs(int)
+// public static long Math.abs(long)
+bool LibraryCallKit::inline_math(vmIntrinsics::ID id) {
+  Node* arg = argument(0);
+  Node* n = NULL;
+  switch (id) {
+  case vmIntrinsics::_fabs:   n = new AbsFNode(                arg);  break;
+  case vmIntrinsics::_iabs:   n = new AbsINode(                arg);  break;
+  case vmIntrinsics::_labs:   n = new AbsLNode(                arg);  break;
   default:  fatal_unexpected_iid(id);  break;
   }
   set_result(_gvn.transform(n));
@@ -1848,8 +1876,11 @@ bool LibraryCallKit::inline_math_native(vmIntrinsics::ID id) {
       runtime_math(OptoRuntime::Math_D_D_Type(), FN_PTR(SharedRuntime::dlog10), "LOG10");
 
     // These intrinsics are supported on all hardware
-  case vmIntrinsics::_dsqrt:  return Matcher::match_rule_supported(Op_SqrtD) ? inline_math(id) : false;
-  case vmIntrinsics::_dabs:   return Matcher::has_match_rule(Op_AbsD)   ? inline_math(id) : false;
+  case vmIntrinsics::_dsqrt:  return Matcher::match_rule_supported(Op_SqrtD) ? inline_double_math(id) : false;
+  case vmIntrinsics::_dabs:   return Matcher::has_match_rule(Op_AbsD)   ? inline_double_math(id) : false;
+  case vmIntrinsics::_fabs:   return Matcher::match_rule_supported(Op_AbsF)   ? inline_math(id) : false;
+  case vmIntrinsics::_iabs:   return Matcher::match_rule_supported(Op_AbsI)   ? inline_math(id) : false;
+  case vmIntrinsics::_labs:   return Matcher::match_rule_supported(Op_AbsL)   ? inline_math(id) : false;
 
   case vmIntrinsics::_dexp:
     return StubRoutines::dexp() != NULL ?
@@ -2400,7 +2431,7 @@ bool LibraryCallKit::inline_unsafe_access(bool is_store, const BasicType type, c
   }
 
   // Can base be NULL? Otherwise, always on-heap access.
-  bool can_access_non_heap = TypePtr::NULL_PTR->higher_equal(_gvn.type(heap_base_oop));
+  bool can_access_non_heap = TypePtr::NULL_PTR->higher_equal(_gvn.type(base));
 
   if (!can_access_non_heap) {
     decorators |= IN_HEAP;
@@ -2408,7 +2439,10 @@ bool LibraryCallKit::inline_unsafe_access(bool is_store, const BasicType type, c
 
   val = is_store ? argument(4) : NULL;
 
-  const TypePtr *adr_type = _gvn.type(adr)->isa_ptr();
+  const TypePtr* adr_type = _gvn.type(adr)->isa_ptr();
+  if (adr_type == TypePtr::NULL_PTR) {
+    return false; // off-heap access with zero address
+  }
 
   // Try to categorize the address.
   Compile::AliasType* alias_type = C->alias_type(adr_type);
@@ -3843,6 +3877,13 @@ LibraryCallKit::generate_method_call(vmIntrinsics::ID method_id, bool is_virtual
                                 method, bci());
     slow_call->set_optimized_virtual(true);
   }
+  if (CallGenerator::is_inlined_method_handle_intrinsic(this->method(), bci(), callee())) {
+    // To be able to issue a direct call (optimized virtual or virtual)
+    // and skip a call to MH.linkTo*/invokeBasic adapter, additional information
+    // about the method being invoked should be attached to the call site to
+    // make resolution logic work (see SharedRuntime::resolve_{virtual,opt_virtual}_call_C).
+    slow_call->set_override_symbolic_info(true);
+  }
   set_arguments_for_java_call(slow_call);
   set_edges_for_java_call(slow_call);
   return slow_call;
@@ -4447,7 +4488,7 @@ bool LibraryCallKit::inline_native_clone(bool is_virtual) {
   return true;
 }
 
-// If we have a tighly coupled allocation, the arraycopy may take care
+// If we have a tightly coupled allocation, the arraycopy may take care
 // of the array initialization. If one of the guards we insert between
 // the allocation and the arraycopy causes a deoptimization, an
 // unitialized array will escape the compiled method. To prevent that
@@ -4460,8 +4501,8 @@ JVMState* LibraryCallKit::arraycopy_restore_alloc_state(AllocateArrayNode* alloc
     ciMethod* trap_method = alloc->jvms()->method();
     int trap_bci = alloc->jvms()->bci();
 
-    if (!C->too_many_traps(trap_method, trap_bci, Deoptimization::Reason_intrinsic) &
-          !C->too_many_traps(trap_method, trap_bci, Deoptimization::Reason_null_check)) {
+    if (!C->too_many_traps(trap_method, trap_bci, Deoptimization::Reason_intrinsic) &&
+        !C->too_many_traps(trap_method, trap_bci, Deoptimization::Reason_null_check)) {
       // Make sure there's no store between the allocation and the
       // arraycopy otherwise visible side effects could be rexecuted
       // in case of deoptimization and cause incorrect execution.
@@ -4471,7 +4512,7 @@ JVMState* LibraryCallKit::arraycopy_restore_alloc_state(AllocateArrayNode* alloc
         for (MergeMemStream mms(merged_memory(), mem->as_MergeMem()); mms.next_non_empty2(); ) {
           Node* n = mms.memory();
           if (n != mms.memory2() && !(n->is_Proj() && n->in(0) == alloc->initialization())) {
-            assert(n->is_Store() || n->Opcode() == Op_ShenandoahWBMemProj, "what else?");
+            assert(n->is_Store(), "what else?");
             no_interfering_store = false;
             break;
           }
@@ -4480,7 +4521,7 @@ JVMState* LibraryCallKit::arraycopy_restore_alloc_state(AllocateArrayNode* alloc
         for (MergeMemStream mms(merged_memory()); mms.next_non_empty(); ) {
           Node* n = mms.memory();
           if (n != mem && !(n->is_Proj() && n->in(0) == alloc->initialization())) {
-            assert(n->is_Store() || n->Opcode() == Op_ShenandoahWBMemProj, "what else?");
+            assert(n->is_Store(), "what else?");
             no_interfering_store = false;
             break;
           }
@@ -6260,6 +6301,11 @@ bool LibraryCallKit::inline_base64_encodeBlock() {
   Node* dp = argument(5);
   Node* isURL = argument(6);
 
+  src = must_be_not_null(src, true);
+  src = access_resolve(src, ACCESS_READ);
+  dest = must_be_not_null(dest, true);
+  dest = access_resolve(dest, ACCESS_WRITE);
+
   Node* src_start = array_element_address(src, intcon(0), T_BYTE);
   assert(src_start, "source array is NULL");
   Node* dest_start = array_element_address(dest, intcon(0), T_BYTE);
@@ -6334,6 +6380,9 @@ bool LibraryCallKit::inline_sha_implCompress(vmIntrinsics::ID id) {
   }
   if (state == NULL) return false;
 
+  assert(stubAddr != NULL, "Stub is generated");
+  if (stubAddr == NULL) return false;
+
   // Call the stub.
   Node* call = make_runtime_call(RC_LEAF|RC_NO_FP, OptoRuntime::sha_implCompress_Type(),
                                  stubAddr, stubName, TypePtr::BOTTOM,
@@ -6406,6 +6455,9 @@ bool LibraryCallKit::inline_digestBase_implCompressMB(int predicate) {
     fatal("unknown SHA intrinsic predicate: %d", predicate);
   }
   if (klass_SHA_name != NULL) {
+    assert(stub_addr != NULL, "Stub is generated");
+    if (stub_addr == NULL) return false;
+
     // get DigestBase klass to lookup for SHA klass
     const TypeInstPtr* tinst = _gvn.type(digestBase_obj)->isa_instptr();
     assert(tinst != NULL, "digestBase_obj is not instance???");
@@ -6584,6 +6636,73 @@ bool LibraryCallKit::inline_character_compare(vmIntrinsics::ID id) {
       fatal_unexpected_iid(id);
   }
 
+  set_result(_gvn.transform(n));
+  return true;
+}
+
+//------------------------------inline_fp_min_max------------------------------
+bool LibraryCallKit::inline_fp_min_max(vmIntrinsics::ID id) {
+/* DISABLED BECAUSE METHOD DATA ISN'T COLLECTED PER CALL-SITE, SEE JDK-8015416.
+
+  // The intrinsic should be used only when the API branches aren't predictable,
+  // the last one performing the most important comparison. The following heuristic
+  // uses the branch statistics to eventually bail out if necessary.
+
+  ciMethodData *md = callee()->method_data();
+
+  if ( md != NULL && md->is_mature() && md->invocation_count() > 0 ) {
+    ciCallProfile cp = caller()->call_profile_at_bci(bci());
+
+    if ( ((double)cp.count()) / ((double)md->invocation_count()) < 0.8 ) {
+      // Bail out if the call-site didn't contribute enough to the statistics.
+      return false;
+    }
+
+    uint taken = 0, not_taken = 0;
+
+    for (ciProfileData *p = md->first_data(); md->is_valid(p); p = md->next_data(p)) {
+      if (p->is_BranchData()) {
+        taken = ((ciBranchData*)p)->taken();
+        not_taken = ((ciBranchData*)p)->not_taken();
+      }
+    }
+
+    double balance = (((double)taken) - ((double)not_taken)) / ((double)md->invocation_count());
+    balance = balance < 0 ? -balance : balance;
+    if ( balance > 0.2 ) {
+      // Bail out if the most important branch is predictable enough.
+      return false;
+    }
+  }
+*/
+
+  Node *a = NULL;
+  Node *b = NULL;
+  Node *n = NULL;
+  switch (id) {
+  case vmIntrinsics::_maxF:
+  case vmIntrinsics::_minF:
+    assert(callee()->signature()->size() == 2, "minF/maxF has 2 parameters of size 1 each.");
+    a = argument(0);
+    b = argument(1);
+    break;
+  case vmIntrinsics::_maxD:
+  case vmIntrinsics::_minD:
+    assert(callee()->signature()->size() == 4, "minD/maxD has 2 parameters of size 2 each.");
+    a = round_double_node(argument(0));
+    b = round_double_node(argument(2));
+    break;
+  default:
+    fatal_unexpected_iid(id);
+    break;
+  }
+  switch (id) {
+  case vmIntrinsics::_maxF:  n = new MaxFNode(a, b);  break;
+  case vmIntrinsics::_minF:  n = new MinFNode(a, b);  break;
+  case vmIntrinsics::_maxD:  n = new MaxDNode(a, b);  break;
+  case vmIntrinsics::_minD:  n = new MinDNode(a, b);  break;
+  default:  fatal_unexpected_iid(id);  break;
+  }
   set_result(_gvn.transform(n));
   return true;
 }

@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHSCHEDULERTHREAD_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHSCHEDULERTHREAD_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHCONTROLTHREAD_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHCONTROLTHREAD_HPP
 
 #include "gc/shared/gcCause.hpp"
 #include "gc/shared/concurrentGCThread.hpp"
@@ -59,7 +59,7 @@ private:
     concurrent_traversal,
     concurrent_normal,
     stw_degenerated,
-    stw_full,
+    stw_full
   } GCMode;
 
   // While we could have a single lock for these, it may risk unblocking
@@ -140,4 +140,4 @@ public:
   void print() const;
 };
 
-#endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHSCHEDULERTHREAD_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHCONTROLTHREAD_HPP

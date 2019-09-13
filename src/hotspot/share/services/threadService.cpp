@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/instanceKlass.hpp"
+#include "oops/objArrayKlass.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/atomic.hpp"
@@ -97,7 +98,7 @@ void ThreadService::init() {
 void ThreadService::reset_peak_thread_count() {
   // Acquire the lock to update the peak thread count
   // to synchronize with thread addition and removal.
-  MutexLockerEx mu(Threads_lock);
+  MutexLocker mu(Threads_lock);
   _peak_threads_count->set_value(get_live_thread_count());
 }
 
@@ -503,8 +504,25 @@ ThreadDumpResult::~ThreadDumpResult() {
   }
 }
 
+ThreadSnapshot* ThreadDumpResult::add_thread_snapshot() {
+  ThreadSnapshot* ts = new ThreadSnapshot();
+  link_thread_snapshot(ts);
+  return ts;
+}
 
-void ThreadDumpResult::add_thread_snapshot(ThreadSnapshot* ts) {
+ThreadSnapshot* ThreadDumpResult::add_thread_snapshot(JavaThread* thread) {
+  // Note: it is very important that the ThreadSnapshot* gets linked before
+  // ThreadSnapshot::initialize gets called. This is to ensure that
+  // ThreadSnapshot::oops_do can get called prior to the field
+  // ThreadSnapshot::_threadObj being assigned a value (to prevent a dangling
+  // oop).
+  ThreadSnapshot* ts = new ThreadSnapshot();
+  link_thread_snapshot(ts);
+  ts->initialize(t_list(), thread);
+  return ts;
+}
+
+void ThreadDumpResult::link_thread_snapshot(ThreadSnapshot* ts) {
   assert(_num_threads == 0 || _num_snapshots < _num_threads,
          "_num_snapshots must be less than _num_threads");
   _num_snapshots++;
@@ -831,12 +849,9 @@ ThreadStatistics::ThreadStatistics() {
   memset((void*) _perf_recursion_counts, 0, sizeof(_perf_recursion_counts));
 }
 
-ThreadSnapshot::ThreadSnapshot(ThreadsList * t_list, JavaThread* thread) {
+void ThreadSnapshot::initialize(ThreadsList * t_list, JavaThread* thread) {
   _thread = thread;
   _threadObj = thread->threadObj();
-  _stack_trace = NULL;
-  _concurrent_locks = NULL;
-  _next = NULL;
 
   ThreadStatistics* stat = thread->get_thread_stat();
   _contended_enter_ticks = stat->contended_enter_ticks();
@@ -845,9 +860,6 @@ ThreadSnapshot::ThreadSnapshot(ThreadsList * t_list, JavaThread* thread) {
   _monitor_wait_count = stat->monitor_wait_count();
   _sleep_ticks = stat->sleep_ticks();
   _sleep_count = stat->sleep_count();
-
-  _blocker_object = NULL;
-  _blocker_object_owner = NULL;
 
   _thread_status = java_lang_Thread::get_thread_status(_threadObj);
   _is_ext_suspended = thread->is_being_ext_suspended();
@@ -881,10 +893,7 @@ ThreadSnapshot::ThreadSnapshot(ThreadsList * t_list, JavaThread* thread) {
   }
 
   // Support for JSR-166 locks
-  if (JDK_Version::current().supports_thread_park_blocker() &&
-        (_thread_status == java_lang_Thread::PARKED ||
-         _thread_status == java_lang_Thread::PARKED_TIMED)) {
-
+  if (_thread_status == java_lang_Thread::PARKED || _thread_status == java_lang_Thread::PARKED_TIMED) {
     _blocker_object = thread->current_park_blocker();
     if (_blocker_object != NULL && _blocker_object->is_a(SystemDictionary::java_util_concurrent_locks_AbstractOwnableSynchronizer_klass())) {
       _blocker_object_owner = java_util_concurrent_locks_AbstractOwnableSynchronizer::get_owner_threadObj(_blocker_object);

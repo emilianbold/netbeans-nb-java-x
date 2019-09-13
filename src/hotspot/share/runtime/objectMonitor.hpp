@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_RUNTIME_OBJECTMONITOR_HPP
-#define SHARE_VM_RUNTIME_OBJECTMONITOR_HPP
+#ifndef SHARE_RUNTIME_OBJECTMONITOR_HPP
+#define SHARE_RUNTIME_OBJECTMONITOR_HPP
 
 #include "memory/allocation.hpp"
 #include "memory/padded.hpp"
@@ -139,6 +139,7 @@ class ObjectMonitor {
   friend class ObjectSynchronizer;
   friend class ObjectWaiter;
   friend class VMStructs;
+  JVMCI_ONLY(friend class JVMCIVMStructs;)
 
   volatile markOop   _header;       // displaced object header word - mark
   void*     volatile _object;       // backward object pointer - strong root
@@ -163,9 +164,9 @@ class ObjectMonitor {
   volatile int _Spinner;            // for exit->spinner handoff optimization
   volatile int _SpinDuration;
 
-  volatile jint  _count;            // reference count to prevent reclamation/deflation
-                                    // at stop-the-world time.  See deflate_idle_monitors().
-                                    // _count is approximately |_WaitSet| + |_EntryList|
+  volatile jint  _contentions;      // Number of active contentions in enter(). It is used by is_busy()
+                                    // along with other fields to determine if an ObjectMonitor can be
+                                    // deflated. See ObjectSynchronizer::deflate_monitor().
  protected:
   ObjectWaiter * volatile _WaitSet; // LL of threads wait()ing on the monitor
   volatile jint  _waiters;          // number of waiting threads
@@ -207,7 +208,6 @@ class ObjectMonitor {
   static int header_offset_in_bytes()      { return offset_of(ObjectMonitor, _header); }
   static int object_offset_in_bytes()      { return offset_of(ObjectMonitor, _object); }
   static int owner_offset_in_bytes()       { return offset_of(ObjectMonitor, _owner); }
-  static int count_offset_in_bytes()       { return offset_of(ObjectMonitor, _count); }
   static int recursions_offset_in_bytes()  { return offset_of(ObjectMonitor, _recursions); }
   static int cxq_offset_in_bytes()         { return offset_of(ObjectMonitor, _cxq); }
   static int succ_offset_in_bytes()        { return offset_of(ObjectMonitor, _succ); }
@@ -232,11 +232,10 @@ class ObjectMonitor {
   void      set_header(markOop hdr);
 
   intptr_t is_busy() const {
-    // TODO-FIXME: merge _count and _waiters.
     // TODO-FIXME: assert _owner == null implies _recursions = 0
-    // TODO-FIXME: assert _WaitSet != null implies _count > 0
-    return _count|_waiters|intptr_t(_owner)|intptr_t(_cxq)|intptr_t(_EntryList);
+    return _contentions|_waiters|intptr_t(_owner)|intptr_t(_cxq)|intptr_t(_EntryList);
   }
+  const char* is_busy_to_string(stringStream* ss);
 
   intptr_t  is_entered(Thread* current) const;
 
@@ -245,8 +244,6 @@ class ObjectMonitor {
 
   jint      waiters() const;
 
-  jint      count() const;
-  void      set_count(jint count);
   jint      contentions() const;
   intptr_t  recursions() const                                         { return _recursions; }
 
@@ -263,16 +260,18 @@ class ObjectMonitor {
   ~ObjectMonitor() {
     // TODO: Add asserts ...
     // _cxq == 0 _succ == NULL _owner == NULL _waiters == 0
-    // _count == 0 _EntryList  == NULL etc
+    // _contentions == 0 _EntryList  == NULL etc
   }
 
  private:
   void Recycle() {
     // TODO: add stronger asserts ...
     // _cxq == 0 _succ == NULL _owner == NULL _waiters == 0
-    // _count == 0 EntryList  == NULL
+    // _contentions == 0 EntryList  == NULL
     // _recursions == 0 _WaitSet == NULL
-    assert(((is_busy()|_recursions) == 0), "freeing inuse monitor");
+    DEBUG_ONLY(stringStream ss;)
+    assert((is_busy() | _recursions) == 0, "freeing in-use monitor: %s, "
+           "recursions=" INTPTR_FORMAT, is_busy_to_string(&ss), _recursions);
     _succ          = NULL;
     _EntryList     = NULL;
     _cxq           = NULL;
@@ -296,6 +295,9 @@ class ObjectMonitor {
   void      notify(TRAPS);
   void      notifyAll(TRAPS);
 
+  void      print() const;
+  void      print_on(outputStream* st) const;
+
 // Use the following at your own risk
   intptr_t  complete_exit(TRAPS);
   void      reenter(intptr_t recursions, TRAPS);
@@ -315,4 +317,4 @@ class ObjectMonitor {
   bool      ExitSuspendEquivalent(JavaThread * Self);
 };
 
-#endif // SHARE_VM_RUNTIME_OBJECTMONITOR_HPP
+#endif // SHARE_RUNTIME_OBJECTMONITOR_HPP

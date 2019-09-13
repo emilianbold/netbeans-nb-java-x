@@ -25,6 +25,8 @@
 
 package com.sun.tools.javac.util;
 
+import com.sun.tools.javac.jvm.ClassFile;
+import com.sun.tools.javac.jvm.PoolConstant;
 import com.sun.tools.javac.util.DefinedBy.Api;
 import com.sun.tools.javac.model.LazyTreeLoader;
 
@@ -37,7 +39,7 @@ import com.sun.tools.javac.model.LazyTreeLoader;
  *  This code and its internal interfaces are subject to change or
  *  deletion without notice.</b>
  */
-public abstract class Name implements javax.lang.model.element.Name {
+public abstract class Name implements javax.lang.model.element.Name, PoolConstant {
 
     public final Table table;
 
@@ -54,6 +56,11 @@ public abstract class Name implements javax.lang.model.element.Name {
             return getIndex() == ((Name)cs).getIndex();
         }
         return toString().equals(cs.toString());
+    }
+
+    @Override
+    public int poolTag() {
+        return ClassFile.CONSTANT_Utf8;
     }
 
     /**
@@ -191,6 +198,14 @@ public abstract class Name implements javax.lang.model.element.Name {
     /** Get the start offset of this name within its byte array.
      */
     public abstract int getByteOffset();
+
+    public interface NameMapper<X> {
+        X map(byte[] bytes, int offset, int len);
+    }
+
+    public <X> X map(NameMapper<X> mapper) {
+        return mapper.map(getByteArray(), getByteOffset(), getByteLength());
+    }
 
     /** An abstraction for the hash table used to create unique Name instances.
      */

@@ -65,15 +65,15 @@ public class ClassReaderTest extends TestCase {
         super.setUp();
     }
 
-    public void testX() throws Exception {
-        byte[] array = "01234567890123456789012345678901234567890123456789".getBytes();
-        InputStream ins = new TestInputStream(new ByteArrayInputStream(array));
-        byte[] read = ClassReader.readInputStream(new byte[30], ins);
-        byte[] readCanonical = new byte[array.length];
-
-        System.arraycopy(read, 0, readCanonical, 0, array.length);
-        assertTrue(Arrays.toString(read) + "vs." + Arrays.toString(array), Arrays.equals(array, readCanonical));
-    }
+//    public void testX() throws Exception {
+//        byte[] array = "01234567890123456789012345678901234567890123456789".getBytes();
+//        InputStream ins = new TestInputStream(new ByteArrayInputStream(array));
+//        byte[] read = ClassReader.readInputStream(new byte[30], ins);
+//        byte[] readCanonical = new byte[array.length];
+//
+//        System.arraycopy(read, 0, readCanonical, 0, array.length);
+//        assertTrue(Arrays.toString(read) + "vs." + Arrays.toString(array), Arrays.equals(array, readCanonical));
+//    }
 
     private static final class TestInputStream extends InputStream {
 

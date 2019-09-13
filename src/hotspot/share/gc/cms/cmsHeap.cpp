@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@
 #include "gc/shared/genOopClosures.inline.hpp"
 #include "gc/shared/strongRootsScope.hpp"
 #include "gc/shared/workgroup.hpp"
+#include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/vmThread.hpp"
 #include "services/memoryManager.hpp"
@@ -65,9 +66,8 @@ public:
   }
 };
 
-CMSHeap::CMSHeap(GenCollectorPolicy *policy) :
-    GenCollectedHeap(policy,
-                     Generation::ParNew,
+CMSHeap::CMSHeap() :
+    GenCollectedHeap(Generation::ParNew,
                      Generation::ConcurrentMarkSweep,
                      "ParNew:CMS"),
     _workers(NULL),
@@ -162,9 +162,7 @@ bool CMSHeap::create_cms_collector() {
   assert(old_gen()->kind() == Generation::ConcurrentMarkSweep,
          "Unexpected generation kinds");
   CMSCollector* collector =
-    new CMSCollector((ConcurrentMarkSweepGeneration*) old_gen(),
-                     rem_set(),
-                     (ConcurrentMarkSweepPolicy*) gen_policy());
+    new CMSCollector((ConcurrentMarkSweepGeneration*) old_gen(), rem_set());
 
   if (collector == NULL || !collector->completed_initialization()) {
     if (collector) {
@@ -225,15 +223,11 @@ void CMSHeap::cms_process_roots(StrongRootsScope* scope,
                                 ScanningOption so,
                                 bool only_strong_roots,
                                 OopsInGenClosure* root_closure,
-                                CLDClosure* cld_closure,
-                                OopStorage::ParState<false, false>* par_state_string) {
+                                CLDClosure* cld_closure) {
   MarkingCodeBlobClosure mark_code_closure(root_closure, !CodeBlobToOopClosure::FixRelocations);
   CLDClosure* weak_cld_closure = only_strong_roots ? NULL : cld_closure;
 
   process_roots(scope, so, root_closure, cld_closure, weak_cld_closure, &mark_code_closure);
-  if (!only_strong_roots) {
-    process_string_table_roots(scope, root_closure, par_state_string);
-  }
 
   if (young_gen_as_roots &&
       _process_strong_tasks->try_claim_task(GCH_PS_younger_gens)) {

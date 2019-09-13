@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_UTILITIES_CONCURRENT_HASH_TABLE_INLINE_HPP
-#define SHARE_UTILITIES_CONCURRENT_HASH_TABLE_INLINE_HPP
+#ifndef SHARE_UTILITIES_CONCURRENTHASHTABLE_INLINE_HPP
+#define SHARE_UTILITIES_CONCURRENTHASHTABLE_INLINE_HPP
 
 #include "memory/allocation.inline.hpp"
 #include "runtime/atomic.hpp"
@@ -193,8 +193,12 @@ inline ConcurrentHashTable<VALUE, CONFIG, F>::
 {
   assert(_log2_size >= SIZE_SMALL_LOG2 && _log2_size <= SIZE_BIG_LOG2,
          "Bad size");
-  void* memory = NEW_C_HEAP_ARRAY(Bucket, _size, F);
-  _buckets = new (memory) Bucket[_size];
+  _buckets = NEW_C_HEAP_ARRAY(Bucket, _size, F);
+  // Use placement new for each element instead of new[] which could use more
+  // memory than allocated.
+  for (size_t i = 0; i < _size; ++i) {
+    new (_buckets + i) Bucket();
+  }
 }
 
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
@@ -481,6 +485,7 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   GlobalCounter::write_synchronize();
   delete_f(rem_n->value());
   Node::destroy_node(rem_n);
+  JFR_ONLY(_stats_rate.remove();)
   return true;
 }
 
@@ -529,6 +534,7 @@ inline void ConcurrentHashTable<VALUE, CONFIG, F>::
     for (size_t node_it = 0; node_it < nd; node_it++) {
       del_f(ndel[node_it]->value());
       Node::destroy_node(ndel[node_it]);
+      JFR_ONLY(_stats_rate.remove();)
       DEBUG_ONLY(ndel[node_it] = (Node*)POISON_PTR;)
     }
     cs_context = GlobalCounter::critical_section_begin(thread);
@@ -567,6 +573,7 @@ inline void ConcurrentHashTable<VALUE, CONFIG, F>::
     GlobalCounter::write_synchronize();
     for (size_t node_it = 0; node_it < dels; node_it++) {
       Node::destroy_node(ndel[node_it]);
+      JFR_ONLY(_stats_rate.remove();)
       DEBUG_ONLY(ndel[node_it] = (Node*)POISON_PTR;)
     }
   }
@@ -874,78 +881,6 @@ inline VALUE* ConcurrentHashTable<VALUE, CONFIG, F>::
 }
 
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
-template <typename LOOKUP_FUNC, typename VALUE_FUNC, typename CALLBACK_FUNC>
-inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
-  internal_get_insert(Thread* thread, LOOKUP_FUNC& lookup_f, VALUE_FUNC& value_f,
-                      CALLBACK_FUNC& callback_f, bool* grow_hint, bool* clean_hint)
-{
-  bool ret = false;
-  bool clean = false;
-  bool locked;
-  size_t loops = 0;
-  size_t i = 0;
-  Node* new_node = NULL;
-  uintx hash = lookup_f.get_hash();
-  while (true) {
-    {
-      ScopedCS cs(thread, this); /* protected the table/bucket */
-      Bucket* bucket = get_bucket(hash);
-
-      Node* first_at_start = bucket->first();
-      Node* old = get_node(bucket, lookup_f, &clean, &loops);
-      if (old == NULL) {
-        // No duplicate found.
-        if (new_node == NULL) {
-          new_node = Node::create_node(value_f(), first_at_start);
-        } else {
-          new_node->set_next(first_at_start);
-        }
-        if (bucket->cas_first(new_node, first_at_start)) {
-          callback_f(true, new_node->value());
-          new_node = NULL;
-          ret = true;
-          break; /* leave critical section */
-        }
-        // CAS failed we must leave critical section and retry.
-        locked = bucket->is_locked();
-      } else {
-        // There is a duplicate.
-        callback_f(false, old->value());
-        break; /* leave critical section */
-      }
-    } /* leave critical section */
-    i++;
-    if (locked) {
-      os::naked_yield();
-    } else {
-      SpinPause();
-    }
-  }
-
-  if (new_node != NULL) {
-    // CAS failed and a duplicate was inserted, we must free this node.
-    Node::destroy_node(new_node);
-  } else if (i == 0 && clean) {
-    // We only do cleaning on fast inserts.
-    Bucket* bucket = get_bucket_locked(thread, lookup_f.get_hash());
-    delete_in_bucket(thread, bucket, lookup_f);
-    bucket->unlock();
-
-    clean = false;
-  }
-
-  if (grow_hint != NULL) {
-    *grow_hint = loops > _grow_hint;
-  }
-
-  if (clean_hint != NULL) {
-    *clean_hint = clean;
-  }
-
-  return ret;
-}
-
-template <typename VALUE, typename CONFIG, MEMFLAGS F>
 template <typename LOOKUP_FUNC>
 inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   internal_insert(Thread* thread, LOOKUP_FUNC& lookup_f, const VALUE& value,
@@ -968,6 +903,7 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
       if (old == NULL) {
         new_node->set_next(first_at_start);
         if (bucket->cas_first(new_node, first_at_start)) {
+          JFR_ONLY(_stats_rate.add();)
           new_node = NULL;
           ret = true;
           break; /* leave critical section */
@@ -1076,6 +1012,7 @@ inline ConcurrentHashTable<VALUE, CONFIG, F>::
        _size_limit_reached(false), _resize_lock_owner(NULL),
        _invisible_epoch(0)
 {
+  _stats_rate = TableRateStatistics();
   _resize_lock =
     new Mutex(Mutex::leaf, "ConcurrentHashTable", false,
               Monitor::_safepoint_check_never);
@@ -1134,16 +1071,6 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
 }
 
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
-template <typename LOOKUP_FUNC>
-inline VALUE ConcurrentHashTable<VALUE, CONFIG, F>::
-  get_copy(Thread* thread, LOOKUP_FUNC& lookup_f, bool* grow_hint)
-{
-  ScopedCS cs(thread, this);
-  VALUE* val = internal_get(thread, lookup_f, grow_hint);
-  return val != NULL ? *val : CONFIG::notfound();
-}
-
-template <typename VALUE, typename CONFIG, MEMFLAGS F>
 inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   unsafe_insert(const VALUE& value) {
   bool dead_hash = false;
@@ -1159,6 +1086,7 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   if (!bucket->cas_first(new_node, bucket->first())) {
     assert(false, "bad");
   }
+  JFR_ONLY(_stats_rate.add();)
   return true;
 }
 
@@ -1260,24 +1188,18 @@ inline void ConcurrentHashTable<VALUE, CONFIG, F>::
 
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
 template <typename VALUE_SIZE_FUNC>
-inline void ConcurrentHashTable<VALUE, CONFIG, F>::
-  statistics_to(Thread* thread, VALUE_SIZE_FUNC& vs_f,
-                outputStream* st, const char* table_name)
+inline TableStatistics ConcurrentHashTable<VALUE, CONFIG, F>::
+  statistics_calculate(Thread* thread, VALUE_SIZE_FUNC& vs_f)
 {
   NumberSeq summary;
   size_t literal_bytes = 0;
-  if (!try_resize_lock(thread)) {
-    st->print_cr("statistics unavailable at this moment");
-    return;
-  }
-
   InternalTable* table = get_table();
   for (size_t bucket_it = 0; bucket_it < table->_size; bucket_it++) {
     ScopedCS cs(thread, this);
     size_t count = 0;
     Bucket* bucket = table->get_bucket(bucket_it);
     if (bucket->have_redirect() || bucket->is_locked()) {
-        continue;
+      continue;
     }
     Node* current_node = bucket->first();
     while (current_node != NULL) {
@@ -1288,37 +1210,39 @@ inline void ConcurrentHashTable<VALUE, CONFIG, F>::
     summary.add((double)count);
   }
 
-  double num_buckets = summary.num();
-  double num_entries = summary.sum();
+  return TableStatistics(_stats_rate, summary, literal_bytes, sizeof(Bucket), sizeof(Node));
+}
 
-  size_t bucket_bytes = num_buckets * sizeof(Bucket);
-  size_t entry_bytes  = num_entries * sizeof(Node);
-  size_t total_bytes = literal_bytes +  bucket_bytes + entry_bytes;
-
-  size_t bucket_size  = (num_buckets <= 0) ? 0 : (bucket_bytes  / num_buckets);
-  size_t entry_size   = (num_entries <= 0) ? 0 : (entry_bytes   / num_entries);
-
-  st->print_cr("%s statistics:", table_name);
-  st->print_cr("Number of buckets       : %9" PRIuPTR " = %9" PRIuPTR
-               " bytes, each " SIZE_FORMAT,
-               (size_t)num_buckets, bucket_bytes,  bucket_size);
-  st->print_cr("Number of entries       : %9" PRIuPTR " = %9" PRIuPTR
-               " bytes, each " SIZE_FORMAT,
-               (size_t)num_entries, entry_bytes,   entry_size);
-  if (literal_bytes != 0) {
-    double literal_avg = (num_entries <= 0) ? 0 : (literal_bytes / num_entries);
-    st->print_cr("Number of literals      : %9" PRIuPTR " = %9" PRIuPTR
-                 " bytes, avg %7.3f",
-                 (size_t)num_entries, literal_bytes, literal_avg);
+template <typename VALUE, typename CONFIG, MEMFLAGS F>
+template <typename VALUE_SIZE_FUNC>
+inline TableStatistics ConcurrentHashTable<VALUE, CONFIG, F>::
+  statistics_get(Thread* thread, VALUE_SIZE_FUNC& vs_f, TableStatistics old)
+{
+  if (!try_resize_lock(thread)) {
+    return old;
   }
-  st->print_cr("Total footprsize_t         : %9s = %9" PRIuPTR " bytes", ""
-               , total_bytes);
-  st->print_cr("Average bucket size     : %9.3f", summary.avg());
-  st->print_cr("Variance of bucket size : %9.3f", summary.variance());
-  st->print_cr("Std. dev. of bucket size: %9.3f", summary.sd());
-  st->print_cr("Maximum bucket size     : %9" PRIuPTR,
-               (size_t)summary.maximum());
+
+  TableStatistics ts = statistics_calculate(thread, vs_f);
   unlock_resize_lock(thread);
+
+  return ts;
+}
+
+template <typename VALUE, typename CONFIG, MEMFLAGS F>
+template <typename VALUE_SIZE_FUNC>
+inline void ConcurrentHashTable<VALUE, CONFIG, F>::
+  statistics_to(Thread* thread, VALUE_SIZE_FUNC& vs_f,
+                outputStream* st, const char* table_name)
+{
+  if (!try_resize_lock(thread)) {
+    st->print_cr("statistics unavailable at this moment");
+    return;
+  }
+
+  TableStatistics ts = statistics_calculate(thread, vs_f);
+  unlock_resize_lock(thread);
+
+  ts.print(st, table_name);
 }
 
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
@@ -1351,4 +1275,4 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   return true;
 }
 
-#endif // include guard
+#endif // SHARE_UTILITIES_CONCURRENTHASHTABLE_INLINE_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,7 +34,6 @@
 #include "gc/parallel/psPromotionManager.inline.hpp"
 #include "gc/parallel/psScavenge.inline.hpp"
 #include "gc/parallel/psTasks.hpp"
-#include "gc/shared/collectorPolicy.hpp"
 #include "gc/shared/gcCause.hpp"
 #include "gc/shared/gcHeapSummary.hpp"
 #include "gc/shared/gcId.hpp"
@@ -49,6 +48,7 @@
 #include "gc/shared/spaceDecorator.hpp"
 #include "gc/shared/weakProcessor.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "logging/log.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/compressedOops.inline.hpp"
@@ -379,6 +379,7 @@ bool PSScavenge::invoke_no_policy() {
       q->enqueue(new ScavengeRootsTask(ScavengeRootsTask::class_loader_data));
       q->enqueue(new ScavengeRootsTask(ScavengeRootsTask::jvmti));
       q->enqueue(new ScavengeRootsTask(ScavengeRootsTask::code_cache));
+      JVMCI_ONLY(q->enqueue(new ScavengeRootsTask(ScavengeRootsTask::jvmci));)
 
       TaskTerminator terminator(active_workers,
                                 (TaskQueueSetSuper*) promotion_manager->stack_array_depth());
@@ -428,12 +429,6 @@ bool PSScavenge::invoke_no_policy() {
     {
       GCTraceTime(Debug, gc, phases) tm("Weak Processing", &_gc_timer);
       WeakProcessor::weak_oops_do(&_is_alive_closure, &root_closure);
-    }
-
-    {
-      GCTraceTime(Debug, gc, phases) tm("Scrub String Table", &_gc_timer);
-      // Unlink any dead interned Strings and process the remaining live ones.
-      StringTable::unlink_or_oops_do(&_is_alive_closure, &root_closure);
     }
 
     // Verify that usage of root_closure didn't copy any objects.
@@ -543,8 +538,7 @@ bool PSScavenge::invoke_no_policy() {
                                                max_eden_size,
                                                false /* not full gc*/);
 
-          size_policy->check_gc_overhead_limit(young_live,
-                                               eden_live,
+          size_policy->check_gc_overhead_limit(eden_live,
                                                max_old_gen_size,
                                                max_eden_size,
                                                false /* not full gc*/,
@@ -760,5 +754,5 @@ void PSScavenge::initialize() {
   // Cache the cardtable
   _card_table = heap->card_table();
 
-  _counters = new CollectorCounters("PSScavenge", 0);
+  _counters = new CollectorCounters("Parallel young collection pauses", 0);
 }

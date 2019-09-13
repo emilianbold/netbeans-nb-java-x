@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1489,18 +1489,19 @@ Node* GraphKit::make_load(Node* ctl, Node* adr, const Type* t, BasicType bt,
                           LoadNode::ControlDependency control_dependency,
                           bool require_atomic_access,
                           bool unaligned,
-                          bool mismatched) {
+                          bool mismatched,
+                          bool unsafe) {
   assert(adr_idx != Compile::AliasIdxTop, "use other make_load factory" );
   const TypePtr* adr_type = NULL; // debug-mode-only argument
   debug_only(adr_type = C->get_adr_type(adr_idx));
   Node* mem = memory(adr_idx);
   Node* ld;
   if (require_atomic_access && bt == T_LONG) {
-    ld = LoadLNode::make_atomic(ctl, mem, adr, adr_type, t, mo, control_dependency, unaligned, mismatched);
+    ld = LoadLNode::make_atomic(ctl, mem, adr, adr_type, t, mo, control_dependency, unaligned, mismatched, unsafe);
   } else if (require_atomic_access && bt == T_DOUBLE) {
-    ld = LoadDNode::make_atomic(ctl, mem, adr, adr_type, t, mo, control_dependency, unaligned, mismatched);
+    ld = LoadDNode::make_atomic(ctl, mem, adr, adr_type, t, mo, control_dependency, unaligned, mismatched, unsafe);
   } else {
-    ld = LoadNode::make(_gvn, ctl, mem, adr, adr_type, t, bt, mo, control_dependency, unaligned, mismatched);
+    ld = LoadNode::make(_gvn, ctl, mem, adr, adr_type, t, bt, mo, control_dependency, unaligned, mismatched, unsafe);
   }
   ld = _gvn.transform(ld);
   if (((bt == T_OBJECT) && C->do_escape_analysis()) || C->eliminate_boxing()) {
@@ -1515,7 +1516,8 @@ Node* GraphKit::store_to_memory(Node* ctl, Node* adr, Node *val, BasicType bt,
                                 MemNode::MemOrd mo,
                                 bool require_atomic_access,
                                 bool unaligned,
-                                bool mismatched) {
+                                bool mismatched,
+                                bool unsafe) {
   assert(adr_idx != Compile::AliasIdxTop, "use other store_to_memory factory" );
   const TypePtr* adr_type = NULL;
   debug_only(adr_type = C->get_adr_type(adr_idx));
@@ -1533,6 +1535,9 @@ Node* GraphKit::store_to_memory(Node* ctl, Node* adr, Node *val, BasicType bt,
   }
   if (mismatched) {
     st->as_Store()->set_mismatched_access();
+  }
+  if (unsafe) {
+    st->as_Store()->set_unsafe_access();
   }
   st = _gvn.transform(st);
   set_memory(st, adr_idx);
@@ -1854,6 +1859,18 @@ void GraphKit::set_predefined_output_for_runtime_call(Node* call,
   }
 }
 
+// Keep track of MergeMems feeding into other MergeMems
+static void add_mergemem_users_to_worklist(Unique_Node_List& wl, Node* mem) {
+  if (!mem->is_MergeMem()) {
+    return;
+  }
+  for (SimpleDUIterator i(mem); i.has_next(); i.next()) {
+    Node* use = i.get();
+    if (use->is_MergeMem()) {
+      wl.push(use);
+    }
+  }
+}
 
 // Replace the call with the current state of the kit.
 void GraphKit::replace_call(CallNode* call, Node* result, bool do_replaced_nodes) {
@@ -1872,6 +1889,7 @@ void GraphKit::replace_call(CallNode* call, Node* result, bool do_replaced_nodes
   CallProjections callprojs;
   call->extract_projections(&callprojs, true);
 
+  Unique_Node_List wl;
   Node* init_mem = call->in(TypeFunc::Memory);
   Node* final_mem = final_state->in(TypeFunc::Memory);
   Node* final_ctl = final_state->in(TypeFunc::Control);
@@ -1887,6 +1905,7 @@ void GraphKit::replace_call(CallNode* call, Node* result, bool do_replaced_nodes
       final_mem = _gvn.transform(final_mem);
     }
     C->gvn_replace_by(callprojs.fallthrough_memproj,   final_mem);
+    add_mergemem_users_to_worklist(wl, final_mem);
   }
   if (callprojs.fallthrough_ioproj != NULL) {
     C->gvn_replace_by(callprojs.fallthrough_ioproj,    final_io);
@@ -1926,7 +1945,9 @@ void GraphKit::replace_call(CallNode* call, Node* result, bool do_replaced_nodes
       ex_ctl = ekit.control();
     }
     if (callprojs.catchall_memproj != NULL) {
-      C->gvn_replace_by(callprojs.catchall_memproj,   ekit.reset_memory());
+      Node* ex_mem = ekit.reset_memory();
+      C->gvn_replace_by(callprojs.catchall_memproj,   ex_mem);
+      add_mergemem_users_to_worklist(wl, ex_mem);
     }
     if (callprojs.catchall_ioproj != NULL) {
       C->gvn_replace_by(callprojs.catchall_ioproj,    ekit.i_o());
@@ -1944,17 +1965,8 @@ void GraphKit::replace_call(CallNode* call, Node* result, bool do_replaced_nodes
 
   // Clean up any MergeMems that feed other MergeMems since the
   // optimizer doesn't like that.
-  if (final_mem->is_MergeMem()) {
-    Node_List wl;
-    for (SimpleDUIterator i(final_mem); i.has_next(); i.next()) {
-      Node* m = i.get();
-      if (m->is_MergeMem() && !wl.contains(m)) {
-        wl.push(m);
-      }
-    }
-    while (wl.size()  > 0) {
-      _gvn.transform(wl.pop());
-    }
+  while (wl.size() > 0) {
+    _gvn.transform(wl.pop());
   }
 
   if (callprojs.fallthrough_catchproj != NULL && !final_ctl->is_top() && do_replaced_nodes) {
@@ -2445,6 +2457,8 @@ Node* GraphKit::make_runtime_call(int flags,
                                   Node* parm2, Node* parm3,
                                   Node* parm4, Node* parm5,
                                   Node* parm6, Node* parm7) {
+  assert(call_addr != NULL, "must not call NULL targets");
+
   // Slow-path call
   bool is_leaf = !(flags & RC_NO_LEAF);
   bool has_io  = (!is_leaf && !(flags & RC_NO_IO));
@@ -2794,6 +2808,22 @@ Node* GraphKit::type_check_receiver(Node* receiver, ciKlass* klass,
   return fail;
 }
 
+//------------------------------subtype_check_receiver-------------------------
+Node* GraphKit::subtype_check_receiver(Node* receiver, ciKlass* klass,
+                                       Node** casted_receiver) {
+  const TypeKlassPtr* tklass = TypeKlassPtr::make(klass);
+  Node* recv_klass = load_object_klass(receiver);
+  Node* want_klass = makecon(tklass);
+
+  Node* slow_ctl = gen_subtype_check(recv_klass, want_klass);
+
+  // Cast receiver after successful check
+  const TypeOopPtr* recv_type = tklass->cast_to_exactness(false)->is_klassptr()->as_instance_type();
+  Node* cast = new CheckCastPPNode(control(), receiver, recv_type);
+  (*casted_receiver) = _gvn.transform(cast);
+
+  return slow_ctl;
+}
 
 //------------------------------seems_never_null-------------------------------
 // Use null_seen information if it is available from the profile.
@@ -2824,6 +2854,60 @@ bool GraphKit::seems_never_null(Node* obj, ciProfileData* data, bool& speculatin
   return false;
 }
 
+void GraphKit::guard_klass_being_initialized(Node* klass) {
+  int init_state_off = in_bytes(InstanceKlass::init_state_offset());
+  Node* adr = basic_plus_adr(top(), klass, init_state_off);
+  Node* init_state = LoadNode::make(_gvn, NULL, immutable_memory(), adr,
+                                    adr->bottom_type()->is_ptr(), TypeInt::BYTE,
+                                    T_BYTE, MemNode::unordered);
+  init_state = _gvn.transform(init_state);
+
+  Node* being_initialized_state = makecon(TypeInt::make(InstanceKlass::being_initialized));
+
+  Node* chk = _gvn.transform(new CmpINode(being_initialized_state, init_state));
+  Node* tst = _gvn.transform(new BoolNode(chk, BoolTest::eq));
+
+  { BuildCutout unless(this, tst, PROB_MAX);
+    uncommon_trap(Deoptimization::Reason_initialized, Deoptimization::Action_reinterpret);
+  }
+}
+
+void GraphKit::guard_init_thread(Node* klass) {
+  int init_thread_off = in_bytes(InstanceKlass::init_thread_offset());
+  Node* adr = basic_plus_adr(top(), klass, init_thread_off);
+
+  Node* init_thread = LoadNode::make(_gvn, NULL, immutable_memory(), adr,
+                                     adr->bottom_type()->is_ptr(), TypePtr::NOTNULL,
+                                     T_ADDRESS, MemNode::unordered);
+  init_thread = _gvn.transform(init_thread);
+
+  Node* cur_thread = _gvn.transform(new ThreadLocalNode());
+
+  Node* chk = _gvn.transform(new CmpPNode(cur_thread, init_thread));
+  Node* tst = _gvn.transform(new BoolNode(chk, BoolTest::eq));
+
+  { BuildCutout unless(this, tst, PROB_MAX);
+    uncommon_trap(Deoptimization::Reason_uninitialized, Deoptimization::Action_none);
+  }
+}
+
+void GraphKit::clinit_barrier(ciInstanceKlass* ik, ciMethod* context) {
+  if (ik->is_being_initialized()) {
+    if (C->needs_clinit_barrier(ik, context)) {
+      Node* klass = makecon(TypeKlassPtr::make(ik));
+      guard_klass_being_initialized(klass);
+      guard_init_thread(klass);
+      insert_mem_bar(Op_MemBarCPUOrder);
+    }
+  } else if (ik->is_initialized()) {
+    return; // no barrier needed
+  } else {
+    uncommon_trap(Deoptimization::Reason_uninitialized,
+                  Deoptimization::Action_reinterpret,
+                  NULL);
+  }
+}
+
 //------------------------maybe_cast_profiled_receiver-------------------------
 // If the profile has seen exactly one type, narrow to exactly that type.
 // Subsequent type checks will always fold up.
@@ -2836,7 +2920,7 @@ Node* GraphKit::maybe_cast_profiled_receiver(Node* not_null_obj,
   Deoptimization::DeoptReason reason = Deoptimization::reason_class_check(spec_klass != NULL);
 
   // Make sure we haven't already deoptimized from this tactic.
-  if (too_many_traps(reason) || too_many_recompiles(reason))
+  if (too_many_traps_or_recompiles(reason))
     return NULL;
 
   // (No, this isn't a call, but it's enough like a virtual call
@@ -2891,9 +2975,8 @@ Node* GraphKit::maybe_cast_profiled_obj(Node* obj,
     Deoptimization::DeoptReason class_reason = Deoptimization::Reason_speculate_class_check;
     Deoptimization::DeoptReason null_reason = Deoptimization::Reason_speculate_null_check;
 
-    if (!too_many_traps(null_reason) && !too_many_recompiles(null_reason) &&
-        !too_many_traps(class_reason) &&
-        !too_many_recompiles(class_reason)) {
+    if (!too_many_traps_or_recompiles(null_reason) &&
+        !too_many_traps_or_recompiles(class_reason)) {
       Node* not_null_obj = NULL;
       // not_null is true if we know the object is not null and
       // there's no need for a null check
@@ -2918,8 +3001,7 @@ Node* GraphKit::maybe_cast_profiled_obj(Node* obj,
       obj = exact_obj;
     }
   } else {
-    if (!too_many_traps(Deoptimization::Reason_null_assert) &&
-        !too_many_recompiles(Deoptimization::Reason_null_assert)) {
+    if (!too_many_traps_or_recompiles(Deoptimization::Reason_null_assert)) {
       Node* exact_obj = null_assert(obj);
       replace_in_map(obj, exact_obj);
       obj = exact_obj;
@@ -3412,6 +3494,10 @@ Node* GraphKit::set_output_for_allocation(AllocateNode* alloc,
     record_for_igvn(minit_in); // fold it up later, if possible
     Node* minit_out = memory(rawidx);
     assert(minit_out->is_Proj() && minit_out->in(0) == init, "");
+    // Add an edge in the MergeMem for the header fields so an access
+    // to one of those has correct memory state
+    set_memory(minit_out, C->get_alias_index(oop_type->add_offset(oopDesc::mark_offset_in_bytes())));
+    set_memory(minit_out, C->get_alias_index(oop_type->add_offset(oopDesc::klass_offset_in_bytes())));
     if (oop_type->isa_aryptr()) {
       const TypePtr* telemref = oop_type->add_offset(Type::OffsetBot);
       int            elemidx  = C->get_alias_index(telemref);
@@ -3868,10 +3954,6 @@ Node* GraphKit::load_String_value(Node* str, bool set_ctrl) {
   Node* p = basic_plus_adr(str, str, value_offset);
   Node* load = access_load_at(str, p, value_field_type, value_type, T_OBJECT,
                               IN_HEAP | (set_ctrl ? C2_CONTROL_DEPENDENT_LOAD : 0) | MO_UNORDERED);
-  // String.value field is known to be @Stable.
-  if (UseImplicitStableValues) {
-    load = cast_array_to_stable(load, value_type);
-  }
   return load;
 }
 
@@ -3883,7 +3965,6 @@ Node* GraphKit::load_String_coder(Node* str, bool set_ctrl) {
   const TypeInstPtr* string_type = TypeInstPtr::make(TypePtr::NotNull, C->env()->String_klass(),
                                                      false, NULL, 0);
   const TypePtr* coder_field_type = string_type->add_offset(coder_offset);
-  int coder_field_idx = C->get_alias_index(coder_field_type);
 
   Node* p = basic_plus_adr(str, str, coder_offset);
   Node* load = access_load_at(str, p, coder_field_type, TypeInt::BYTE, T_BYTE,
@@ -4020,10 +4101,4 @@ Node* GraphKit::make_constant_from_field(ciField* field, Node* obj) {
     return makecon(con_type);
   }
   return NULL;
-}
-
-Node* GraphKit::cast_array_to_stable(Node* ary, const TypeAryPtr* ary_type) {
-  // Reify the property as a CastPP node in Ideal graph to comply with monotonicity
-  // assumption of CCP analysis.
-  return _gvn.transform(new CastPPNode(ary, ary_type->cast_to_stable(true)));
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,7 +58,8 @@ public enum SourceVersion {
      *   9: modules, small cleanups to 1.7 and 1.8 changes
      *  10: local-variable type inference (var)
      *  11: local-variable syntax for lambda parameters
-     *  12: TBD
+     *  12: no changes (switch expressions were in preview)
+     *  13: no changes (switch expressions and text blocks in preview)
      */
 
     /**
@@ -183,7 +184,15 @@ public enum SourceVersion {
      *
      * @since 12
      */
-     RELEASE_12;
+     RELEASE_12,
+
+    /**
+     * The version recognized by the Java Platform, Standard Edition
+     * 13.
+     *
+     * @since 13
+     */
+     RELEASE_13;
 
     // Note that when adding constants for newer releases, the
     // behavior of latest() and latestSupported() must be updated too.
@@ -194,7 +203,7 @@ public enum SourceVersion {
      * @return the latest source version that can be modeled
      */
     public static SourceVersion latest() {
-        return RELEASE_12;
+        return RELEASE_13;
     }
 
     private static final SourceVersion latestSupported = getLatestSupported();
@@ -204,6 +213,8 @@ public enum SourceVersion {
             String specVersion = System.getProperty("java.specification.version");
 
             switch (specVersion) {
+                case "13":
+                    return RELEASE_13;
                 case "12":
                     return RELEASE_12;
                 case "11":
@@ -219,7 +230,8 @@ public enum SourceVersion {
                 case "1.6":
                     return RELEASE_6;
             }
-        } catch (SecurityException se) {}
+        } catch (SecurityException se) {
+        }
 
         return RELEASE_5;
     }
@@ -244,8 +256,8 @@ public enum SourceVersion {
      * followed only by characters for which {@link
      * Character#isJavaIdentifierPart(int)} returns {@code true}.
      * This pattern matches regular identifiers, keywords, restricted
-     * keywords, and the literals {@code "true"}, {@code "false"},
-     * {@code "null"}, and {@code "var"}.
+     * keywords, restricted identifiers and the literals {@code "true"},
+     * {@code "false"}, {@code "null"}.
      *
      * The method returns {@code false} for all other strings.
      *
@@ -282,7 +294,7 @@ public enum SourceVersion {
      * for keywords, boolean literals, and the null literal.
      *
      * This method returns {@code true} for <i>restricted
-     * keywords</i> and {@code "var"}.
+     * keywords</i> and <i>restricted identifiers</i>
      *
      * @param name the string to check
      * @return {@code true} if this string is a
@@ -301,7 +313,7 @@ public enum SourceVersion {
      * for keywords, boolean literals, and the null literal.
      *
      * This method returns {@code true} for <i>restricted
-     * keywords</i> and {@code "var"}.
+     * keywords</i> and <i>restricted identifiers</i>
      *
      * @param name the string to check
      * @param version the version to use
@@ -325,7 +337,7 @@ public enum SourceVersion {
      * Returns whether or not {@code s} is a keyword, boolean literal,
      * or null literal in the latest source version.
      * This method returns {@code false} for <i>restricted
-     * keywords</i> and {@code "var"}.
+     * keywords</i> and <i>restricted identifiers</i>.
      *
      * @param s the string to check
      * @return {@code true} if {@code s} is a keyword, or boolean
@@ -342,7 +354,7 @@ public enum SourceVersion {
      * Returns whether or not {@code s} is a keyword, boolean literal,
      * or null literal in the given source version.
      * This method returns {@code false} for <i>restricted
-     * keywords</i> and {@code "var"}.
+     * keywords</i> and <i>restricted identifiers</i>.
      *
      * @param s the string to check
      * @param version the version to use

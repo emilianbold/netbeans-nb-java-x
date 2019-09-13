@@ -65,10 +65,6 @@ public class UnicodeReader {
      */
     protected int unicodeConversionBp = -1;
 
-    /** Control conversion of unicode characters
-     */
-    protected boolean unicodeConversion = true;
-
     protected Log log;
     protected Names names;
 
@@ -163,10 +159,19 @@ public class UnicodeReader {
         return new String(sbuf, 0, sp);
     }
 
-    protected boolean setUnicodeConversion(boolean newState) {
-        boolean oldState = unicodeConversion;
-        unicodeConversion = newState;
-        return oldState;
+    /** Add 'count' copies of the character 'ch' to the string buffer.
+     */
+    protected void repeat(char ch, int count) {
+        for ( ; 0 < count; count--) {
+            putChar(ch, false);
+        }
+    }
+
+    /** Reset the scan buffer pointer to 'pos'.
+     */
+    protected void reset(int pos) {
+        bp = pos - 1;
+        scanChar();
     }
 
     /** Convert unicode escape; bp points to initial '\' character
@@ -174,7 +179,7 @@ public class UnicodeReader {
      */
     protected void convertUnicode() {
         int startPos = bp;
-        if (ch == '\\' && unicodeConversion && unicodeConversionBp != bp) {
+        if (ch == '\\' && unicodeConversionBp != bp ) {
             bp++; ch = buf[bp];
             if (ch == 'u') {
                 do {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_CLASSFILE_SHAREDPATHSMISCINFO_HPP
-#define SHARE_VM_CLASSFILE_SHAREDPATHSMISCINFO_HPP
+#ifndef SHARE_CLASSFILE_SHAREDPATHSMISCINFO_HPP
+#define SHARE_CLASSFILE_SHAREDPATHSMISCINFO_HPP
 
 #include "classfile/classLoader.hpp"
 #include "runtime/os.hpp"
@@ -67,7 +67,7 @@ protected:
 
 protected:
   static bool fail(const char* msg, const char* name = NULL);
-  bool check(jint type, const char* path);
+  bool check(jint type, const char* path, bool is_static);
 
 public:
   enum {
@@ -162,7 +162,7 @@ private:
   }
 
 public:
-  bool check();
+  bool check(bool is_static);
 };
 
-#endif // SHARE_VM_CLASSFILE_SHAREDPATHSMISCINFO_HPP
+#endif // SHARE_CLASSFILE_SHAREDPATHSMISCINFO_HPP

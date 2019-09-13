@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,10 +33,12 @@
 #include "compiler/disassembler.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/filemap.hpp"
 #include "oops/oop.inline.hpp"
 #include "os_bsd.inline.hpp"
+#include "os_posix.inline.hpp"
 #include "os_share_bsd.hpp"
 #include "prims/jniFastGetField.hpp"
 #include "prims/jvm_misc.hpp"
@@ -676,7 +678,7 @@ static void *thread_native_entry(Thread *thread) {
 
   // handshaking with parent thread
   {
-    MutexLockerEx ml(sync, Mutex::_no_safepoint_check_flag);
+    MutexLocker ml(sync, Mutex::_no_safepoint_check_flag);
 
     // notify parent thread
     osthread->set_state(INITIALIZED);
@@ -684,7 +686,7 @@ static void *thread_native_entry(Thread *thread) {
 
     // wait until os::start_thread()
     while (osthread->get_state() == INITIALIZED) {
-      sync->wait(Mutex::_no_safepoint_check_flag);
+      sync->wait_without_safepoint_check();
     }
   }
 
@@ -742,6 +744,11 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
     } else {
       log_warning(os, thread)("Failed to start thread - pthread_create failed (%s) for attributes: %s.",
         os::errno_name(ret), os::Posix::describe_pthread_attr(buf, sizeof(buf), &attr));
+      // Log some OS information which might explain why creating the thread failed.
+      log_info(os, thread)("Number of threads approx. running in the VM: %d", Threads::number_of_threads());
+      LogStream st(Log(os, thread)::info());
+      os::Posix::print_rlimit_info(&st);
+      os::print_memory_info(&st);
     }
 
     pthread_attr_destroy(&attr);
@@ -759,9 +766,9 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
     // Wait until child thread is either initialized or aborted
     {
       Monitor* sync_with_child = osthread->startThread_lock();
-      MutexLockerEx ml(sync_with_child, Mutex::_no_safepoint_check_flag);
+      MutexLocker ml(sync_with_child, Mutex::_no_safepoint_check_flag);
       while ((state = osthread->get_state()) == ALLOCATED) {
-        sync_with_child->wait(Mutex::_no_safepoint_check_flag);
+        sync_with_child->wait_without_safepoint_check();
       }
     }
 
@@ -833,7 +840,7 @@ void os::pd_start_thread(Thread* thread) {
   OSThread * osthread = thread->osthread();
   assert(osthread->get_state() != INITIALIZED, "just checking");
   Monitor* sync_with_child = osthread->startThread_lock();
-  MutexLockerEx ml(sync_with_child, Mutex::_no_safepoint_check_flag);
+  MutexLocker ml(sync_with_child, Mutex::_no_safepoint_check_flag);
   sync_with_child->notify();
 }
 
@@ -1066,9 +1073,16 @@ void os::abort(bool dump_core, void* siginfo, const void* context) {
 }
 
 // Die immediately, no exit hook, no abort hook, no cleanup.
+// Dump a core file, if possible, for debugging.
 void os::die() {
-  // _exit() on BsdThreads only kills current thread
-  ::abort();
+  if (TestUnresponsiveErrorHandler && !CreateCoredumpOnCrash) {
+    // For TimeoutInErrorHandlingTest.java, we just kill the VM
+    // and don't take the time to generate a core file.
+    os::signal_raise(SIGKILL);
+  } else {
+    // _exit() on BsdThreads only kills current thread
+    ::abort();
+  }
 }
 
 // Information of current thread in variety of formats
@@ -1251,13 +1265,21 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
 #else
   void * result= ::dlopen(filename, RTLD_LAZY);
   if (result != NULL) {
+    Events::log(NULL, "Loaded shared library %s", filename);
     // Successful loading
     return result;
   }
 
-  // Read system error message into ebuf
-  ::strncpy(ebuf, ::dlerror(), ebuflen-1);
-  ebuf[ebuflen-1]='\0';
+  const char* error_report = ::dlerror();
+  if (error_report == NULL) {
+    error_report = "dlerror returned no error description";
+  }
+  if (ebuf != NULL && ebuflen > 0) {
+    // Read system error message into ebuf
+    ::strncpy(ebuf, error_report, ebuflen-1);
+    ebuf[ebuflen-1]='\0';
+  }
+  Events::log(NULL, "Loading shared library %s failed, %s", filename, error_report);
 
   return NULL;
 #endif // STATIC_BUILD
@@ -1269,16 +1291,24 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
 #else
   void * result= ::dlopen(filename, RTLD_LAZY);
   if (result != NULL) {
+    Events::log(NULL, "Loaded shared library %s", filename);
     // Successful loading
     return result;
   }
 
   Elf32_Ehdr elf_head;
 
-  // Read system error message into ebuf
-  // It may or may not be overwritten below
-  ::strncpy(ebuf, ::dlerror(), ebuflen-1);
-  ebuf[ebuflen-1]='\0';
+  const char* const error_report = ::dlerror();
+  if (error_report == NULL) {
+    error_report = "dlerror returned no error description";
+  }
+  if (ebuf != NULL && ebuflen > 0) {
+    // Read system error message into ebuf
+    ::strncpy(ebuf, error_report, ebuflen-1);
+    ebuf[ebuflen-1]='\0';
+  }
+  Events::log(NULL, "Loading shared library %s failed, %s", filename, error_report);
+
   int diag_msg_max_length=ebuflen-strlen(ebuf);
   char* diag_msg_buf=ebuf+strlen(ebuf);
 
@@ -1591,6 +1621,8 @@ void os::get_summary_cpu_info(char* buf, size_t buflen) {
 }
 
 void os::print_memory_info(outputStream* st) {
+  xsw_usage swap_usage;
+  size_t size = sizeof(swap_usage);
 
   st->print("Memory:");
   st->print(" %dk page", os::vm_page_size()>>10);
@@ -1599,6 +1631,16 @@ void os::print_memory_info(outputStream* st) {
             os::physical_memory() >> 10);
   st->print("(" UINT64_FORMAT "k free)",
             os::available_memory() >> 10);
+
+  if((sysctlbyname("vm.swapusage", &swap_usage, &size, NULL, 0) == 0) || (errno == ENOMEM)) {
+    if (size >= offset_of(xsw_usage, xsu_used)) {
+      st->print(", swap " UINT64_FORMAT "k",
+                ((julong) swap_usage.xsu_total) >> 10);
+      st->print("(" UINT64_FORMAT "k free)",
+                ((julong) swap_usage.xsu_avail) >> 10);
+    }
+  }
+
   st->cr();
 }
 
@@ -1914,6 +1956,7 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
   int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
 #ifdef __OpenBSD__
   // XXX: Work-around mmap/MAP_FIXED bug temporarily on OpenBSD
+  Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+size), prot);
   if (::mprotect(addr, size, prot) == 0) {
     return true;
   }
@@ -1998,6 +2041,7 @@ char *os::scan_pages(char *start, char* end, page_info* page_expected, page_info
 bool os::pd_uncommit_memory(char* addr, size_t size) {
 #ifdef __OpenBSD__
   // XXX: Work-around mmap/MAP_FIXED bug temporarily on OpenBSD
+  Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with PROT_NONE", p2i(addr), p2i(addr+size));
   return ::mprotect(addr, size, PROT_NONE) == 0;
 #else
   uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
@@ -2066,6 +2110,7 @@ static bool bsd_mprotect(char* addr, size_t size, int prot) {
   assert(addr == bottom, "sanity check");
 
   size = align_up(pointer_delta(addr, bottom, 1) + size, os::Bsd::page_size());
+  Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(bottom), p2i(bottom+size), prot);
   return ::mprotect(bottom, size, prot) == 0;
 }
 
@@ -2144,11 +2189,6 @@ char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr, int f
 // available (and not reserved for something else).
 
 char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
-  const int max_tries = 10;
-  char* base[max_tries];
-  size_t size[max_tries];
-  const size_t gap = 0x000000;
-
   // Assert only that the size is a multiple of the page size, since
   // that's all that mmap requires, and since that's all we really know
   // about at this low abstraction level.  If we need higher alignment,
@@ -2171,74 +2211,7 @@ char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
     anon_munmap(addr, bytes);
   }
 
-  int i;
-  for (i = 0; i < max_tries; ++i) {
-    base[i] = reserve_memory(bytes);
-
-    if (base[i] != NULL) {
-      // Is this the block we wanted?
-      if (base[i] == requested_addr) {
-        size[i] = bytes;
-        break;
-      }
-
-      // Does this overlap the block we wanted? Give back the overlapped
-      // parts and try again.
-
-      size_t top_overlap = requested_addr + (bytes + gap) - base[i];
-      if (top_overlap >= 0 && top_overlap < bytes) {
-        unmap_memory(base[i], top_overlap);
-        base[i] += top_overlap;
-        size[i] = bytes - top_overlap;
-      } else {
-        size_t bottom_overlap = base[i] + bytes - requested_addr;
-        if (bottom_overlap >= 0 && bottom_overlap < bytes) {
-          unmap_memory(requested_addr, bottom_overlap);
-          size[i] = bytes - bottom_overlap;
-        } else {
-          size[i] = bytes;
-        }
-      }
-    }
-  }
-
-  // Give back the unused reserved pieces.
-
-  for (int j = 0; j < i; ++j) {
-    if (base[j] != NULL) {
-      unmap_memory(base[j], size[j]);
-    }
-  }
-
-  if (i < max_tries) {
-    return requested_addr;
-  } else {
-    return NULL;
-  }
-}
-
-size_t os::read(int fd, void *buf, unsigned int nBytes) {
-  RESTARTABLE_RETURN_INT(::read(fd, buf, nBytes));
-}
-
-size_t os::read_at(int fd, void *buf, unsigned int nBytes, jlong offset) {
-  RESTARTABLE_RETURN_INT(::pread(fd, buf, nBytes, offset));
-}
-
-void os::naked_short_sleep(jlong ms) {
-  struct timespec req;
-
-  assert(ms < 1000, "Un-interruptable sleep, short time use only");
-  req.tv_sec = 0;
-  if (ms > 0) {
-    req.tv_nsec = (ms % 1000) * 1000000;
-  } else {
-    req.tv_nsec = 1;
-  }
-
-  nanosleep(&req, NULL);
-
-  return;
+  return NULL;
 }
 
 // Sleep forever; naked call to OS-specific sleep; use with CAUTION
@@ -2272,7 +2245,8 @@ void os::naked_yield() {
 // not the entire user process, and user level threads are 1:1 mapped to kernel
 // threads. It has always been the case, but could change in the future. For
 // this reason, the code should not be used as default (ThreadPriorityPolicy=0).
-// It is only used when ThreadPriorityPolicy=1 and requires root privilege.
+// It is only used when ThreadPriorityPolicy=1 and may require system level permission
+// (e.g., root privilege or CAP_SYS_NICE capability).
 
 #if !defined(__APPLE__)
 int os::java_to_os_priority[CriticalPriority + 1] = {
@@ -2319,14 +2293,12 @@ int os::java_to_os_priority[CriticalPriority + 1] = {
 
 static int prio_init() {
   if (ThreadPriorityPolicy == 1) {
-    // Only root can raise thread priority. Don't allow ThreadPriorityPolicy=1
-    // if effective uid is not root. Perhaps, a more elegant way of doing
-    // this is to test CAP_SYS_NICE capability, but that will require libcap.so
     if (geteuid() != 0) {
       if (!FLAG_IS_DEFAULT(ThreadPriorityPolicy)) {
-        warning("-XX:ThreadPriorityPolicy requires root privilege on Bsd");
+        warning("-XX:ThreadPriorityPolicy=1 may require system level permission, " \
+                "e.g., being the root user. If the necessary permission is not " \
+                "possessed, changes to priority will be silently ignored.");
       }
-      ThreadPriorityPolicy = 0;
     }
   }
   if (UseCriticalJavaThreadPriority) {
@@ -2343,17 +2315,17 @@ OSReturn os::set_native_priority(Thread* thread, int newpri) {
   return OS_OK;
 #elif defined(__FreeBSD__)
   int ret = pthread_setprio(thread->osthread()->pthread_id(), newpri);
+  return (ret == 0) ? OS_OK : OS_ERR;
 #elif defined(__APPLE__) || defined(__NetBSD__)
   struct sched_param sp;
   int policy;
-  pthread_t self = pthread_self();
 
-  if (pthread_getschedparam(self, &policy, &sp) != 0) {
+  if (pthread_getschedparam(thread->osthread()->pthread_id(), &policy, &sp) != 0) {
     return OS_ERR;
   }
 
   sp.sched_priority = newpri;
-  if (pthread_setschedparam(self, policy, &sp) != 0) {
+  if (pthread_setschedparam(thread->osthread()->pthread_id(), policy, &sp) != 0) {
     return OS_ERR;
   }
 
@@ -2377,8 +2349,14 @@ OSReturn os::get_native_priority(const Thread* const thread, int *priority_ptr) 
   int policy;
   struct sched_param sp;
 
-  pthread_getschedparam(pthread_self(), &policy, &sp);
-  *priority_ptr = sp.sched_priority;
+  int res = pthread_getschedparam(thread->osthread()->pthread_id(), &policy, &sp);
+  if (res != 0) {
+    *priority_ptr = -1;
+    return OS_ERR;
+  } else {
+    *priority_ptr = sp.sched_priority;
+    return OS_OK;
+  }
 #else
   *priority_ptr = getpriority(PRIO_PROCESS, thread->osthread()->thread_id());
 #endif
@@ -2584,7 +2562,7 @@ static bool do_suspend(OSThread* osthread) {
 
   // managed to send the signal and switch to SUSPEND_REQUEST, now wait for SUSPENDED
   while (true) {
-    if (sr_semaphore.timedwait(0, 2 * NANOSECS_PER_MILLISEC)) {
+    if (sr_semaphore.timedwait(2)) {
       break;
     } else {
       // timeout
@@ -2618,7 +2596,7 @@ static void do_resume(OSThread* osthread) {
 
   while (true) {
     if (sr_notify(osthread) == 0) {
-      if (sr_semaphore.timedwait(0, 2 * NANOSECS_PER_MILLISEC)) {
+      if (sr_semaphore.timedwait(2)) {
         if (osthread->sr.is_running()) {
           return;
         }
@@ -2676,11 +2654,6 @@ static void signalHandler(int sig, siginfo_t* info, void* uc) {
 bool os::Bsd::signal_handlers_are_installed = false;
 
 // For signal-chaining
-struct sigaction sigact[NSIG];
-uint32_t sigs = 0;
-#if (32 < NSIG-1)
-#error "Not all signals can be encoded in sigs. Adapt its type!"
-#endif
 bool os::Bsd::libjsig_is_loaded = false;
 typedef struct sigaction *(*get_signal_t)(int);
 get_signal_t os::Bsd::get_signal_action = NULL;
@@ -2694,7 +2667,7 @@ struct sigaction* os::Bsd::get_chained_signal_action(int sig) {
   }
   if (actp == NULL) {
     // Retrieve the preinstalled signal handler from jvm
-    actp = get_preinstalled_handler(sig);
+    actp = os::Posix::get_preinstalled_handler(sig);
   }
 
   return actp;
@@ -2757,19 +2730,6 @@ bool os::Bsd::chained_handler(int sig, siginfo_t* siginfo, void* context) {
   return chained;
 }
 
-struct sigaction* os::Bsd::get_preinstalled_handler(int sig) {
-  if ((((uint32_t)1 << (sig-1)) & sigs) != 0) {
-    return &sigact[sig];
-  }
-  return NULL;
-}
-
-void os::Bsd::save_preinstalled_handler(int sig, struct sigaction& oldAct) {
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  sigact[sig] = oldAct;
-  sigs |= (uint32_t)1 << (sig-1);
-}
-
 // for diagnostic
 int sigflags[NSIG];
 
@@ -2801,7 +2761,7 @@ void os::Bsd::set_signal_handler(int sig, bool set_installed) {
       return;
     } else if (UseSignalChaining) {
       // save the old handler in jvm
-      save_preinstalled_handler(sig, oldAct);
+      os::Posix::save_preinstalled_handler(sig, oldAct);
       // libjsig also interposes the sigaction() call below and saves the
       // old sigaction on it own.
     } else {
@@ -3277,6 +3237,70 @@ int os::active_processor_count() {
 
   return _processor_count;
 }
+
+#ifdef __APPLE__
+uint os::processor_id() {
+  static volatile int* volatile apic_to_cpu_mapping = NULL;
+  static volatile int next_cpu_id = 0;
+
+  volatile int* mapping = OrderAccess::load_acquire(&apic_to_cpu_mapping);
+  if (mapping == NULL) {
+    // Calculate possible number space for APIC ids. This space is not necessarily
+    // in the range [0, number_of_cpus).
+    uint total_bits = 0;
+    for (uint i = 0;; ++i) {
+      uint eax = 0xb; // Query topology leaf
+      uint ebx;
+      uint ecx = i;
+      uint edx;
+
+      __asm__ ("cpuid\n\t" : "+a" (eax), "+b" (ebx), "+c" (ecx), "+d" (edx) : );
+
+      uint level_type = (ecx >> 8) & 0xFF;
+      if (level_type == 0) {
+        // Invalid level; end of topology
+        break;
+      }
+      uint level_apic_id_shift = eax & ((1u << 5) - 1);
+      total_bits += level_apic_id_shift;
+    }
+
+    uint max_apic_ids = 1u << total_bits;
+    mapping = NEW_C_HEAP_ARRAY(int, max_apic_ids, mtInternal);
+
+    for (uint i = 0; i < max_apic_ids; ++i) {
+      mapping[i] = -1;
+    }
+
+    if (!Atomic::replace_if_null(mapping, &apic_to_cpu_mapping)) {
+      FREE_C_HEAP_ARRAY(int, mapping);
+      mapping = OrderAccess::load_acquire(&apic_to_cpu_mapping);
+    }
+  }
+
+  uint eax = 0xb;
+  uint ebx;
+  uint ecx = 0;
+  uint edx;
+
+  asm ("cpuid\n\t" : "+a" (eax), "+b" (ebx), "+c" (ecx), "+d" (edx) : );
+
+  // Map from APIC id to a unique logical processor ID in the expected
+  // [0, num_processors) range.
+
+  uint apic_id = edx;
+  int cpu_id = Atomic::load(&mapping[apic_id]);
+
+  while (cpu_id < 0) {
+    if (Atomic::cmpxchg(-2, &mapping[apic_id], -1)) {
+      Atomic::store(Atomic::add(1, &next_cpu_id) - 1, &mapping[apic_id]);
+    }
+    cpu_id = Atomic::load(&mapping[apic_id]);
+  }
+
+  return (uint)cpu_id;
+}
+#endif
 
 void os::set_native_thread_name(const char *name) {
 #if defined(__APPLE__) && MAC_OS_X_VERSION_MIN_REQUIRED > MAC_OS_X_VERSION_10_5

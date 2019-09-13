@@ -40,43 +40,6 @@
 //=============================================================================
 // Helper methods for _get* and _put* bytecodes
 //=============================================================================
-bool Parse::static_field_ok_in_clinit(ciField *field, ciMethod *method) {
-  // Could be the field_holder's <clinit> method, or <clinit> for a subklass.
-  // Better to check now than to Deoptimize as soon as we execute
-  assert( field->is_static(), "Only check if field is static");
-  // is_being_initialized() is too generous.  It allows access to statics
-  // by threads that are not running the <clinit> before the <clinit> finishes.
-  // return field->holder()->is_being_initialized();
-
-  // The following restriction is correct but conservative.
-  // It is also desirable to allow compilation of methods called from <clinit>
-  // but this generated code will need to be made safe for execution by
-  // other threads, or the transition from interpreted to compiled code would
-  // need to be guarded.
-  ciInstanceKlass *field_holder = field->holder();
-
-  bool access_OK = false;
-  if (method->holder()->is_subclass_of(field_holder)) {
-    if (method->is_static()) {
-      if (method->name() == ciSymbol::class_initializer_name()) {
-        // OK to access static fields inside initializer
-        access_OK = true;
-      }
-    } else {
-      if (method->name() == ciSymbol::object_initializer_name()) {
-        // It's also OK to access static fields inside a constructor,
-        // because any thread calling the constructor must first have
-        // synchronized on the class by executing a '_new' bytecode.
-        access_OK = true;
-      }
-    }
-  }
-
-  return access_OK;
-
-}
-
-
 void Parse::do_field_access(bool is_get, bool is_field) {
   bool will_link;
   ciField* field = iter().get_field(will_link);
@@ -92,21 +55,17 @@ void Parse::do_field_access(bool is_get, bool is_field) {
     return;
   }
 
-  if (!is_field && !field_holder->is_initialized()) {
-    if (!static_field_ok_in_clinit(field, method())) {
-      uncommon_trap(Deoptimization::Reason_uninitialized,
-                    Deoptimization::Action_reinterpret,
-                    NULL, "!static_field_ok_in_clinit");
-      return;
-    }
-  }
-
   // Deoptimize on putfield writes to call site target field.
   if (!is_get && field->is_call_site_target()) {
     uncommon_trap(Deoptimization::Reason_unhandled,
                   Deoptimization::Action_reinterpret,
                   NULL, "put to call site target field");
     return;
+  }
+
+  if (C->needs_clinit_barrier(field, method())) {
+    clinit_barrier(field_holder, method());
+    if (stopped())  return;
   }
 
   assert(field->will_link(method(), bc()), "getfield: typeflow responsibility");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,7 +63,7 @@ extern "C" {
  *    class.
  */
 
-#define JVM_INTERFACE_VERSION 5
+#define JVM_INTERFACE_VERSION 6
 
 JNIEXPORT jint JNICALL
 JVM_GetInterfaceVersion(void);
@@ -450,7 +450,7 @@ JVM_AddReadsModule(JNIEnv *env, jobject from_module, jobject source_module);
  */
 
 JNIEXPORT jstring JNICALL
-JVM_GetClassName(JNIEnv *env, jclass cls);
+JVM_InitClassName(JNIEnv *env, jclass cls);
 
 JNIEXPORT jobjectArray JNICALL
 JVM_GetClassInterfaces(JNIEnv *env, jclass cls);
@@ -1280,18 +1280,7 @@ typedef struct {
     unsigned int reserved3 : 8;
     unsigned int reserved1 : 16;
     unsigned int reserved2;
-
-    /* The following bits represents new JDK supports that VM has dependency on.
-     * VM implementation can use these bits to determine which JDK version
-     * and support it has to maintain runtime compatibility.
-     *
-     * When a new bit is added in a minor or update release, make sure
-     * the new bit is also added in the main/baseline.
-     */
-    unsigned int thread_park_blocker : 1;
-    unsigned int post_vm_init_hook_enabled : 1;
-    unsigned int pending_list_uses_discovered_field : 1;
-    unsigned int : 29;
+    unsigned int : 32;
     unsigned int : 32;
     unsigned int : 32;
 } jdk_version_info;

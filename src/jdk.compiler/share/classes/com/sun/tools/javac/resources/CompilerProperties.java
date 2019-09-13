@@ -11,7 +11,6 @@ import com.sun.tools.javac.jvm.Profile;
 import com.sun.tools.javac.jvm.Target;
 import com.sun.tools.javac.main.Option;
 import com.sun.tools.javac.parser.Tokens.TokenKind;
-import com.sun.tools.javac.tree.JCTree.Tag;
 import com.sun.tools.javac.util.JCDiagnostic;
 import com.sun.tools.javac.util.Name;
 import java.io.File;
@@ -70,7 +69,8 @@ public class CompilerProperties {
         
         /**
          * compiler.err.addmods.all.module.path.invalid=\
-         *    --add-modules ALL-MODULE-PATH can only be used when compiling the unnamed module
+         *    --add-modules ALL-MODULE-PATH can only be used when compiling the unnamed module or \
+         *    when compiling in the context of an automatic module
          */
         public static final Error AddmodsAllModulePathInvalid = new Error("compiler", "addmods.all.module.path.invalid");
         
@@ -315,37 +315,8 @@ public class CompilerProperties {
         }
         
         /**
-         * compiler.err.break.ambiguous.target=\
-         *    ambiguous reference to ''{0}''\n\
-         *    (''{0}'' is both a label and an expression)
-         */
-        public static Error BreakAmbiguousTarget(Name arg0) {
-            return new Error("compiler", "break.ambiguous.target", arg0);
-        }
-        
-        /**
-         * compiler.err.break.complex.value.no.switch.expression=\
-         *    unexpected value break
-         */
-        public static final Error BreakComplexValueNoSwitchExpression = new Error("compiler", "break.complex.value.no.switch.expression");
-        
-        /**
-         * compiler.err.break.expr.not.immediate=\
-         *    value break not supported in ''{0}''
-         */
-        public static Error BreakExprNotImmediate(Tag arg0) {
-            return new Error("compiler", "break.expr.not.immediate", arg0);
-        }
-        
-        /**
-         * compiler.err.break.missing.value=\
-         *    missing break value
-         */
-        public static final Error BreakMissingValue = new Error("compiler", "break.missing.value");
-        
-        /**
          * compiler.err.break.outside.switch.expression=\
-         *    break outside of enclosing switch expression
+         *    attempt to break out of a switch expression
          */
         public static final Error BreakOutsideSwitchExpression = new Error("compiler", "break.outside.switch.expression");
         
@@ -484,7 +455,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -495,7 +466,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -506,7 +477,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -517,7 +488,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -528,7 +499,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -539,7 +510,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -550,7 +521,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -561,7 +532,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -572,7 +543,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -583,7 +554,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -594,7 +565,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -605,7 +576,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -616,7 +587,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -627,7 +598,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -638,7 +609,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -649,7 +620,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -660,7 +631,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -671,7 +642,7 @@ public class CompilerProperties {
          * compiler.err.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types;\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Error CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -993,7 +964,7 @@ public class CompilerProperties {
         
         /**
          * compiler.err.continue.outside.switch.expression=\
-         *    continue outside of enclosing switch expression
+         *    attempt to continue out of a switch expression
          */
         public static final Error ContinueOutsideSwitchExpression = new Error("compiler", "continue.outside.switch.expression");
         
@@ -1704,10 +1675,12 @@ public class CompilerProperties {
         }
         
         /**
-         * compiler.err.illegal.ref.to.var.type=\
-         *    illegal reference to restricted type ''var''
+         * compiler.err.illegal.ref.to.restricted.type=\
+         *    illegal reference to restricted type ''{0}''
          */
-        public static final Error IllegalRefToVarType = new Error("compiler", "illegal.ref.to.var.type");
+        public static Error IllegalRefToRestrictedType(Name arg0) {
+            return new Error("compiler", "illegal.ref.to.restricted.type", arg0);
+        }
         
         /**
          * compiler.err.illegal.self.ref=\
@@ -1741,6 +1714,12 @@ public class CompilerProperties {
         public static Error IllegalStaticIntfMethCall(Type arg0) {
             return new Error("compiler", "illegal.static.intf.meth.call", arg0);
         }
+        
+        /**
+         * compiler.err.illegal.text.block.open=\
+         *    illegal text block open delimiter sequence, missing line terminator
+         */
+        public static final Error IllegalTextBlockOpen = new Error("compiler", "illegal.text.block.open");
         
         /**
          * compiler.err.illegal.underscore=\
@@ -1794,7 +1773,7 @@ public class CompilerProperties {
          * compiler.err.incorrect.constructor.receiver.name=\
          *    the receiver name does not match the enclosing outer class type\n\
          *    required: {0}\n\
-         *    found: {1}
+         *    found:    {1}
          */
         public static Error IncorrectConstructorReceiverName(Type arg0, Type arg1) {
             return new Error("compiler", "incorrect.constructor.receiver.name", arg0, arg1);
@@ -1804,7 +1783,7 @@ public class CompilerProperties {
          * compiler.err.incorrect.constructor.receiver.type=\
          *    the receiver type does not match the enclosing outer class type\n\
          *    required: {0}\n\
-         *    found: {1}
+         *    found:    {1}
          */
         public static Error IncorrectConstructorReceiverType(Type arg0, Type arg1) {
             return new Error("compiler", "incorrect.constructor.receiver.type", arg0, arg1);
@@ -1814,7 +1793,7 @@ public class CompilerProperties {
          * compiler.err.incorrect.receiver.name=\
          *    the receiver name does not match the enclosing class type\n\
          *    required: {0}\n\
-         *    found: {1}
+         *    found:    {1}
          */
         public static Error IncorrectReceiverName(Type arg0, Type arg1) {
             return new Error("compiler", "incorrect.receiver.name", arg0, arg1);
@@ -1824,7 +1803,7 @@ public class CompilerProperties {
          * compiler.err.incorrect.receiver.type=\
          *    the receiver type does not match the enclosing class type\n\
          *    required: {0}\n\
-         *    found: {1}
+         *    found:    {1}
          */
         public static Error IncorrectReceiverType(Type arg0, Type arg1) {
             return new Error("compiler", "incorrect.receiver.type", arg0, arg1);
@@ -1978,6 +1957,14 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.err.invalid.path=\
+         *    Invalid filename: {0}
+         */
+        public static Error InvalidPath(String arg0) {
+            return new Error("compiler", "invalid.path", arg0);
+        }
+        
+        /**
          * compiler.err.invalid.profile=\
          *    invalid profile: {0}
          */
@@ -2128,6 +2115,13 @@ public class CompilerProperties {
         public static Error InvalidTarget(String arg0) {
             return new Error("compiler", "invalid.target", arg0);
         }
+        
+        /**
+         * compiler.err.invalid.yield=\
+         *    invalid use of a restricted identifier ''yield''\n\
+         *    (to invoke a method called yield, qualify the yield with a receiver or type name)
+         */
+        public static final Error InvalidYield = new Error("compiler", "invalid.yield");
         
         /**
          * compiler.err.io.exception=\
@@ -2517,6 +2511,19 @@ public class CompilerProperties {
         public static Error NoSuperclass(Type arg0) {
             return new Error("compiler", "no.superclass", arg0);
         }
+        
+        /**
+         * compiler.err.no.switch.expression =\
+         *    yield outside of switch expression
+         */
+        public static final Error NoSwitchExpression = new Error("compiler", "no.switch.expression");
+        
+        /**
+         * compiler.err.no.switch.expression.qualify=\
+         *    yield outside of switch expression\n\
+         *    (to invoke a method called yield, qualify the yield with a receiver or type name)
+         */
+        public static final Error NoSwitchExpressionQualify = new Error("compiler", "no.switch.expression.qualify");
         
         /**
          * compiler.err.no.value.for.option=\
@@ -3057,6 +3064,14 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.err.proc.cant.load.class=\
+         *    Could not load processor class file due to ''{0}''.
+         */
+        public static Error ProcCantLoadClass(String arg0) {
+            return new Error("compiler", "proc.cant.load.class", arg0);
+        }
+        
+        /**
          * compiler.err.proc.messager=\
          *    {0}
          */
@@ -3224,6 +3239,39 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.err.restricted.type.not.allowed=\
+         *    ''{0}'' not allowed here\n\
+         *    as of release {1}, ''{0}'' is a restricted type name and cannot be used for type declarations
+         */
+        public static Error RestrictedTypeNotAllowed(Name arg0, Source arg1) {
+            return new Error("compiler", "restricted.type.not.allowed", arg0, arg1);
+        }
+        
+        /**
+         * compiler.err.restricted.type.not.allowed.array=\
+         *    ''{0}'' is not allowed as an element type of an array
+         */
+        public static Error RestrictedTypeNotAllowedArray(Name arg0) {
+            return new Error("compiler", "restricted.type.not.allowed.array", arg0);
+        }
+        
+        /**
+         * compiler.err.restricted.type.not.allowed.compound=\
+         *    ''{0}'' is not allowed in a compound declaration
+         */
+        public static Error RestrictedTypeNotAllowedCompound(Name arg0) {
+            return new Error("compiler", "restricted.type.not.allowed.compound", arg0);
+        }
+        
+        /**
+         * compiler.err.restricted.type.not.allowed.here=\
+         *    ''{0}'' is not allowed here
+         */
+        public static Error RestrictedTypeNotAllowedHere(Name arg0) {
+            return new Error("compiler", "restricted.type.not.allowed.here", arg0);
+        }
+        
+        /**
          * compiler.err.ret.outside.meth=\
          *    return outside method
          */
@@ -3231,7 +3279,7 @@ public class CompilerProperties {
         
         /**
          * compiler.err.return.outside.switch.expression=\
-         *    return outside of enclosing switch expression
+         *    attempt to return out of a switch expression
          */
         public static final Error ReturnOutsideSwitchExpression = new Error("compiler", "return.outside.switch.expression");
         
@@ -3381,6 +3429,12 @@ public class CompilerProperties {
          *    switch expression does not have any case clauses
          */
         public static final Error SwitchExpressionEmpty = new Error("compiler", "switch.expression.empty");
+        
+        /**
+         * compiler.err.switch.expression.no.result.expressions=\
+         *    switch expression does not have any result expressions
+         */
+        public static final Error SwitchExpressionNoResultExpressions = new Error("compiler", "switch.expression.no.result.expressions");
         
         /**
          * compiler.err.switch.mixing.case.types=\
@@ -3554,6 +3608,12 @@ public class CompilerProperties {
         public static final Error UnclosedStrLit = new Error("compiler", "unclosed.str.lit");
         
         /**
+         * compiler.err.unclosed.text.block=\
+         *    unclosed text block
+         */
+        public static final Error UnclosedTextBlock = new Error("compiler", "unclosed.text.block");
+        
+        /**
          * compiler.err.undef.label=\
          *    undefined label: {0}
          */
@@ -3595,12 +3655,6 @@ public class CompilerProperties {
         public static Error UnexpectedType(Set<? extends KindName> arg0, Set<? extends KindName> arg1) {
             return new Error("compiler", "unexpected.type", arg0, arg1);
         }
-        
-        /**
-         * compiler.err.unicode.backtick=\
-         *    attempt to use \\u0060 as a raw string literal delimiter
-         */
-        public static final Error UnicodeBacktick = new Error("compiler", "unicode.backtick");
         
         /**
          * compiler.err.unmatched.quote=\
@@ -3692,31 +3746,6 @@ public class CompilerProperties {
         public static Error VarMightNotHaveBeenInitialized(Symbol arg0) {
             return new Error("compiler", "var.might.not.have.been.initialized", arg0);
         }
-        
-        /**
-         * compiler.err.var.not.allowed=\
-         *    ''var'' not allowed here\n\
-         *    as of release 10, ''var'' is a restricted local variable type and cannot be used for type declarations
-         */
-        public static final Error VarNotAllowed = new Error("compiler", "var.not.allowed");
-        
-        /**
-         * compiler.err.var.not.allowed.array=\
-         *    ''var'' is not allowed as an element type of an array
-         */
-        public static final Error VarNotAllowedArray = new Error("compiler", "var.not.allowed.array");
-        
-        /**
-         * compiler.err.var.not.allowed.compound=\
-         *    ''var'' is not allowed in a compound declaration
-         */
-        public static final Error VarNotAllowedCompound = new Error("compiler", "var.not.allowed.compound");
-        
-        /**
-         * compiler.err.var.not.allowed.here=\
-         *    ''var'' is not allowed here
-         */
-        public static final Error VarNotAllowedHere = new Error("compiler", "var.not.allowed.here");
         
         /**
          * compiler.err.var.not.initialized.in.default.constructor=\
@@ -4073,12 +4102,26 @@ public class CompilerProperties {
         public static final Warning IllegalCharForEncoding = new Warning("compiler", "illegal.char.for.encoding");
         
         /**
+         * compiler.warn.illegal.ref.to.restricted.type=\
+         *    illegal reference to restricted type ''{0}''
+         */
+        public static Warning IllegalRefToRestrictedType(Name arg0) {
+            return new Warning("compiler", "illegal.ref.to.restricted.type", arg0);
+        }
+        
+        /**
          * compiler.warn.improper.SVUID=\
          *    serialVersionUID must be declared static final in class {0}
          */
         public static Warning ImproperSVUID(Symbol arg0) {
             return new Warning("compiler", "improper.SVUID", arg0);
         }
+        
+        /**
+         * compiler.warn.inconsistent.white.space.indentation=\
+         *    inconsistent white space indentation
+         */
+        public static final Warning InconsistentWhiteSpaceIndentation = new Warning("compiler", "inconsistent.white.space.indentation");
         
         /**
          * compiler.warn.incubating.modules=\
@@ -4113,6 +4156,13 @@ public class CompilerProperties {
         public static Warning InvalidPath(String arg0) {
             return new Warning("compiler", "invalid.path", arg0);
         }
+        
+        /**
+         * compiler.warn.invalid.yield=\
+         *    ''yield'' may become a restricted identifier in a future release\n\
+         *    (to invoke a method called yield, qualify the yield with a receiver or type name)
+         */
+        public static final Warning InvalidYield = new Warning("compiler", "invalid.yield");
         
         /**
          * compiler.warn.leaks.not.accessible=\
@@ -4471,6 +4521,22 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.warn.proc.duplicate.option.name=\
+         *    Duplicate supported option ''{0}'' returned by annotation processor ''{1}''
+         */
+        public static Warning ProcDuplicateOptionName(String arg0, String arg1) {
+            return new Warning("compiler", "proc.duplicate.option.name", arg0, arg1);
+        }
+        
+        /**
+         * compiler.warn.proc.duplicate.supported.annotation=\
+         *    Duplicate supported annotation type ''{0}'' returned by annotation processor ''{1}''
+         */
+        public static Warning ProcDuplicateSupportedAnnotation(String arg0, String arg1) {
+            return new Warning("compiler", "proc.duplicate.supported.annotation", arg0, arg1);
+        }
+        
+        /**
          * compiler.warn.proc.file.create.last.round=\
          *    File for type ''{0}'' created in the last round will not be subject to annotation processing.
          */
@@ -4530,6 +4596,14 @@ public class CompilerProperties {
          */
         public static Warning ProcProcessorIncompatibleSourceVersion(SourceVersion arg0, String arg1, String arg2) {
             return new Warning("compiler", "proc.processor.incompatible.source.version", arg0, arg1, arg2);
+        }
+        
+        /**
+         * compiler.warn.proc.redundant.types.with.wildcard=\
+         *    Annotation processor ''{0}'' redundantly supports both ''*'' and other annotation types
+         */
+        public static Warning ProcRedundantTypesWithWildcard(String arg0) {
+            return new Warning("compiler", "proc.redundant.types.with.wildcard", arg0);
         }
         
         /**
@@ -4624,6 +4698,22 @@ public class CompilerProperties {
         public static final Warning RequiresTransitiveAutomatic = new Warning("compiler", "requires.transitive.automatic");
         
         /**
+         * compiler.warn.restricted.type.not.allowed=\
+         *    as of release {1}, ''{0}'' is a restricted type name and cannot be used for type declarations or as the element type of an array
+         */
+        public static Warning RestrictedTypeNotAllowed(Name arg0, Source arg1) {
+            return new Warning("compiler", "restricted.type.not.allowed", arg0, arg1);
+        }
+        
+        /**
+         * compiler.warn.restricted.type.not.allowed.preview=\
+         *    ''{0}'' may become a restricted type name in a future release and may be unusable for type declarations or as the element type of an array
+         */
+        public static Warning RestrictedTypeNotAllowedPreview(Name arg0, Source arg1) {
+            return new Warning("compiler", "restricted.type.not.allowed.preview", arg0, arg1);
+        }
+        
+        /**
          * compiler.warn.self.ref=\
          *    self-reference in initializer of variable ''{0}''
          */
@@ -4678,6 +4768,12 @@ public class CompilerProperties {
         public static Warning TargetDefaultSourceConflict(String arg0, Target arg1) {
             return new Warning("compiler", "target.default.source.conflict", arg0, arg1);
         }
+        
+        /**
+         * compiler.warn.trailing.white.space.will.be.removed=\
+         *    trailing white space will be removed
+         */
+        public static final Warning TrailingWhiteSpaceWillBeRemoved = new Warning("compiler", "trailing.white.space.will.be.removed");
         
         /**
          * compiler.warn.try.explicit.close.call=\
@@ -4741,7 +4837,7 @@ public class CompilerProperties {
          * compiler.warn.unchecked.meth.invocation.applied=\
          *    unchecked method invocation: {0} {1} in {4} {5} is applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}
+         *    found:    {3}
          */
         public static Warning UncheckedMethInvocationApplied(KindName arg0, Name arg1, Object arg2, Object arg3, KindName arg4, Symbol arg5) {
             return new Warning("compiler", "unchecked.meth.invocation.applied", arg0, arg1, arg2, arg3, arg4, arg5);
@@ -4812,12 +4908,6 @@ public class CompilerProperties {
         public static Warning UnreachableCatch1(List<? extends Type> arg0) {
             return new Warning("compiler", "unreachable.catch.1", arg0);
         }
-        
-        /**
-         * compiler.warn.var.not.allowed=\
-         *    as of release 10, ''var'' is a restricted local variable type and cannot be used for type declarations or as the element type of an array
-         */
-        public static final Warning VarNotAllowed = new Warning("compiler", "var.not.allowed");
         
         /**
          * compiler.warn.varargs.redundant.trustme.anno=\
@@ -5553,6 +5643,33 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.misc.bad.const.pool.index=\
+         *    bad constant pool index in {0}\n\
+         *    index {1} is not within pool size {2}.
+         */
+        public static Fragment BadConstPoolIndex(File arg0, int arg1, int arg2) {
+            return new Fragment("compiler", "bad.const.pool.index", arg0, arg1, arg2);
+        }
+        
+        /**
+         * compiler.misc.bad.const.pool.index=\
+         *    bad constant pool index in {0}\n\
+         *    index {1} is not within pool size {2}.
+         */
+        public static Fragment BadConstPoolIndex(JavaFileObject arg0, int arg1, int arg2) {
+            return new Fragment("compiler", "bad.const.pool.index", arg0, arg1, arg2);
+        }
+        
+        /**
+         * compiler.misc.bad.const.pool.index=\
+         *    bad constant pool index in {0}\n\
+         *    index {1} is not within pool size {2}.
+         */
+        public static Fragment BadConstPoolIndex(Path arg0, int arg1, int arg2) {
+            return new Fragment("compiler", "bad.const.pool.index", arg0, arg1, arg2);
+        }
+        
+        /**
          * compiler.misc.bad.const.pool.tag=\
          *    bad constant pool tag: {0}
          */
@@ -5799,7 +5916,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5810,7 +5927,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5821,7 +5938,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5832,7 +5949,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5843,7 +5960,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5854,7 +5971,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, List<? extends Type> arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5865,7 +5982,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5876,7 +5993,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5887,7 +6004,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5898,7 +6015,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5909,7 +6026,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5920,7 +6037,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, JCDiagnostic arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5931,7 +6048,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, List<? extends Type> arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5942,7 +6059,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, List<? extends Type> arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5953,7 +6070,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, JCDiagnostic arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5964,7 +6081,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, JCDiagnostic arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -5975,7 +6092,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, Fragment arg3, Kind arg4, Type arg5, JCDiagnostic arg6) {
@@ -5986,7 +6103,7 @@ public class CompilerProperties {
          * compiler.misc.cant.apply.symbol=\
          *    {0} {1} in {4} {5} cannot be applied to given types\n\
          *    required: {2}\n\
-         *    found: {3}\n\
+         *    found:    {3}\n\
          *    reason: {6}
          */
         public static Fragment CantApplySymbol(Kind arg0, Name arg1, Fragment arg2, Fragment arg3, Kind arg4, Type arg5, Fragment arg6) {
@@ -6135,6 +6252,14 @@ public class CompilerProperties {
         }
         
         /**
+         * compiler.misc.count.error.recompile=\
+         *    only showing the first {0} errors, of {1} total; use -Xmaxerrs if you would like to see more
+         */
+        public static Fragment CountErrorRecompile(int arg0, int arg1) {
+            return new Fragment("compiler", "count.error.recompile", arg0, arg1);
+        }
+        
+        /**
          * compiler.misc.count.warn=\
          *    {0} warning
          */
@@ -6148,6 +6273,14 @@ public class CompilerProperties {
          */
         public static Fragment CountWarnPlural(int arg0) {
             return new Fragment("compiler", "count.warn.plural", arg0);
+        }
+        
+        /**
+         * compiler.misc.count.warn.recompile=\
+         *    only showing the first {0} warnings, of {1} total; use -Xmaxwarns if you would like to see more
+         */
+        public static Fragment CountWarnRecompile(int arg0, int arg1) {
+            return new Fragment("compiler", "count.warn.recompile", arg0, arg1);
         }
         
         /**
@@ -6389,12 +6522,6 @@ public class CompilerProperties {
         public static final Fragment FeaturePrivateIntfMethods = new Fragment("compiler", "feature.private.intf.methods");
         
         /**
-         * compiler.misc.feature.raw.string.literals=\
-         *    raw string literals
-         */
-        public static final Fragment FeatureRawStringLiterals = new Fragment("compiler", "feature.raw.string.literals");
-        
-        /**
          * compiler.misc.feature.repeatable.annotations=\
          *    repeated annotations
          */
@@ -6423,6 +6550,12 @@ public class CompilerProperties {
          *    switch rules
          */
         public static final Fragment FeatureSwitchRules = new Fragment("compiler", "feature.switch.rules");
+        
+        /**
+         * compiler.misc.feature.text.blocks=\
+         *    text blocks
+         */
+        public static final Fragment FeatureTextBlocks = new Fragment("compiler", "feature.text.blocks");
         
         /**
          * compiler.misc.feature.type.annotations=\
@@ -6831,12 +6964,6 @@ public class CompilerProperties {
          *    enum
          */
         public static final Fragment KindnameEnum = new Fragment("compiler", "kindname.enum");
-        
-        /**
-         * compiler.misc.kindname.error=\
-         *    erroneous
-         */
-        public static final Fragment KindnameError = new Fragment("compiler", "kindname.error");
         
         /**
          * compiler.misc.kindname.instance.init=\
@@ -7453,36 +7580,6 @@ public class CompilerProperties {
          *    <string>
          */
         public static final Fragment TokenString = new Fragment("compiler", "token.string");
-        
-        /**
-         * compiler.misc.tree.tag.doloop=\
-         *    do
-         */
-        public static final Fragment TreeTagDoloop = new Fragment("compiler", "tree.tag.doloop");
-        
-        /**
-         * compiler.misc.tree.tag.foreachloop=\
-         *    for
-         */
-        public static final Fragment TreeTagForeachloop = new Fragment("compiler", "tree.tag.foreachloop");
-        
-        /**
-         * compiler.misc.tree.tag.forloop=\
-         *    for
-         */
-        public static final Fragment TreeTagForloop = new Fragment("compiler", "tree.tag.forloop");
-        
-        /**
-         * compiler.misc.tree.tag.switch=\
-         *    switch
-         */
-        public static final Fragment TreeTagSwitch = new Fragment("compiler", "tree.tag.switch");
-        
-        /**
-         * compiler.misc.tree.tag.whileloop=\
-         *    while
-         */
-        public static final Fragment TreeTagWhileloop = new Fragment("compiler", "tree.tag.whileloop");
         
         /**
          * compiler.misc.try.not.applicable.to.type=\

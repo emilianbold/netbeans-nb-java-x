@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,6 +48,7 @@
 #include "memory/allocation.inline.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/objArrayKlass.hpp"
@@ -57,6 +58,7 @@
 #include "runtime/compilationPolicy.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaCalls.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -573,7 +575,7 @@ JRT_ENTRY_NO_ASYNC(static address, exception_handler_for_pc_helper(JavaThread* t
       tempst.print("compiled method <%s>\n"
                    " at PC" INTPTR_FORMAT " for thread " INTPTR_FORMAT,
                    nm->method()->print_value_string(), p2i(pc), p2i(thread));
-      Exceptions::log_exception(exception, tempst);
+      Exceptions::log_exception(exception, tempst.as_string());
     }
     // for AbortVMOnException flag
     Exceptions::debug_check_abort(exception);
@@ -1045,7 +1047,7 @@ JRT_ENTRY(void, Runtime1::patch_code(JavaThread* thread, Runtime1::StubID stub_i
   // Now copy code back
 
   {
-    MutexLockerEx ml_patch (Patching_lock, Mutex::_no_safepoint_check_flag);
+    MutexLocker ml_patch (Patching_lock, Mutex::_no_safepoint_check_flag);
     //
     // Deoptimization may have happened while we waited for the lock.
     // In that case we don't bother to do any patching we just return
@@ -1263,8 +1265,8 @@ JRT_ENTRY(void, Runtime1::patch_code(JavaThread* thread, Runtime1::StubID stub_i
 
   // If we are patching in a non-perm oop, make sure the nmethod
   // is on the right list.
-  if (ScavengeRootsInCode) {
-    MutexLockerEx ml_code (CodeCache_lock, Mutex::_no_safepoint_check_flag);
+  {
+    MutexLocker ml_code (CodeCache_lock, Mutex::_no_safepoint_check_flag);
     nmethod* nm = CodeCache::find_nmethod(caller_frame.pc());
     guarantee(nm != NULL, "only nmethods can contain non-perm oops");
 

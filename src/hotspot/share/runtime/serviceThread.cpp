@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@
 #include "classfile/stringTable.hpp"
 #include "classfile/symbolTable.hpp"
 #include "classfile/systemDictionary.hpp"
+#include "memory/universe.hpp"
+#include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaCalls.hpp"
 #include "runtime/jniHandles.hpp"
@@ -81,27 +83,9 @@ void ServiceThread::initialize() {
   }
 }
 
-static bool needs_oopstorage_cleanup(OopStorage* const* storages,
-                                     bool* needs_cleanup,
-                                     size_t size) {
-  bool any_needs_cleanup = false;
+static void cleanup_oopstorages(OopStorage* const* storages, size_t size) {
   for (size_t i = 0; i < size; ++i) {
-    assert(!needs_cleanup[i], "precondition");
-    if (storages[i]->needs_delete_empty_blocks()) {
-      needs_cleanup[i] = true;
-      any_needs_cleanup = true;
-    }
-  }
-  return any_needs_cleanup;
-}
-
-static void cleanup_oopstorages(OopStorage* const* storages,
-                                const bool* needs_cleanup,
-                                size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    if (needs_cleanup[i]) {
-      storages[i]->delete_empty_blocks();
-    }
+    storages[i]->delete_empty_blocks();
   }
 }
 
@@ -124,7 +108,6 @@ void ServiceThread::service_thread_entry(JavaThread* jt, TRAPS) {
     bool resolved_method_table_work = false;
     bool protection_domain_table_work = false;
     bool oopstorage_work = false;
-    bool oopstorages_cleanup[oopstorage_count] = {}; // Zero (false) initialize.
     JvmtiDeferredEvent jvmti_event;
     {
       // Need state transition ThreadBlockInVM so that this thread
@@ -137,7 +120,7 @@ void ServiceThread::service_thread_entry(JavaThread* jt, TRAPS) {
 
       ThreadBlockInVM tbivm(jt);
 
-      MonitorLockerEx ml(Service_lock, Mutex::_no_safepoint_check_flag);
+      MonitorLocker ml(Service_lock, Mutex::_no_safepoint_check_flag);
       // Process all available work on each (outer) iteration, rather than
       // only the first recognized bit of work, to avoid frequently true early
       // tests from potentially starving later work.  Hence the use of
@@ -150,13 +133,10 @@ void ServiceThread::service_thread_entry(JavaThread* jt, TRAPS) {
               (symboltable_work = SymbolTable::has_work()) |
               (resolved_method_table_work = ResolvedMethodTable::has_work()) |
               (protection_domain_table_work = SystemDictionary::pd_cache_table()->has_work()) |
-              (oopstorage_work = needs_oopstorage_cleanup(oopstorages,
-                                                          oopstorages_cleanup,
-                                                          oopstorage_count)))
-
+              (oopstorage_work = OopStorage::has_cleanup_work_and_reset()))
              == 0) {
         // Wait until notified that there is some work to do.
-        ml.wait(Mutex::_no_safepoint_check_flag);
+        ml.wait();
       }
 
       if (has_jvmti_events) {
@@ -189,7 +169,7 @@ void ServiceThread::service_thread_entry(JavaThread* jt, TRAPS) {
     }
 
     if (resolved_method_table_work) {
-      ResolvedMethodTable::unlink();
+      ResolvedMethodTable::do_concurrent_work(jt);
     }
 
     if (protection_domain_table_work) {
@@ -197,7 +177,7 @@ void ServiceThread::service_thread_entry(JavaThread* jt, TRAPS) {
     }
 
     if (oopstorage_work) {
-      cleanup_oopstorages(oopstorages, oopstorages_cleanup, oopstorage_count);
+      cleanup_oopstorages(oopstorages, oopstorage_count);
     }
   }
 }

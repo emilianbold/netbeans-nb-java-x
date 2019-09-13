@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_JFR_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP
-#define SHARE_VM_JFR_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP
+#ifndef SHARE_JFR_RECORDER_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP
+#define SHARE_JFR_RECORDER_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP
 
 #include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdBits.inline.hpp"
 #include "jfr/recorder/checkpoint/types/traceid/jfrTraceIdEpoch.hpp"
@@ -108,7 +108,7 @@
 #define SET_USED_THIS_EPOCH(ptr)        (SET_TAG(ptr, IN_USE_THIS_EPOCH_BIT))
 #define SET_USED_PREV_EPOCH(ptr)        (SET_TAG_CAS(ptr, IN_USE_PREV_EPOCH_BIT))
 #define SET_LEAKP_USED_THIS_EPOCH(ptr)  (SET_LEAKP_TAG(ptr, IN_USE_THIS_EPOCH_BIT))
-#define SET_LEAKP_USED_PREV_EPOCH(ptr)  (SET_LEAKP_TAG(ptr, IN_USE_PREV_EPOCH_BIT))
+#define SET_LEAKP_USED_PREV_EPOCH(ptr)  (SET_LEAKP_TAG_CAS(ptr, IN_USE_PREV_EPOCH_BIT))
 #define SET_METHOD_AND_CLASS_USED_THIS_EPOCH(kls) (SET_TAG(kls, METHOD_AND_CLASS_IN_USE_THIS_EPOCH_BITS))
 
 #define USED_THIS_EPOCH(ptr)            (((ptr)->trace_id() & IN_USE_THIS_EPOCH_BIT) != 0)
@@ -184,4 +184,4 @@
 #define CLEAR_METHOD_FLAG_USED_THIS_EPOCH(m) (clear_bits_cas((jbyte)JfrTraceIdEpoch::in_use_this_epoch_bit(), (m)->trace_flags_addr()))
 #define CLEAR_METHOD_FLAG_USED_PREV_EPOCH(m) (clear_bits_cas((jbyte)JfrTraceIdEpoch::in_use_prev_epoch_bit(), (m)->trace_flags_addr()))
 
-#endif // SHARE_VM_JFR_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP
+#endif // SHARE_JFR_RECORDER_CHECKPOINT_TYPES_TRACEID_JFRTRACEIDMACROS_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,10 +22,10 @@
  *
  */
 
-#ifndef SHARE_VM_OPTO_C2_GLOBALS_HPP
-#define SHARE_VM_OPTO_C2_GLOBALS_HPP
+#ifndef SHARE_OPTO_C2_GLOBALS_HPP
+#define SHARE_OPTO_C2_GLOBALS_HPP
 
-#include "runtime/globals.hpp"
+#include "runtime/globals_shared.hpp"
 #include "utilities/macros.hpp"
 
 #include CPU_HEADER(c2_globals)
@@ -509,9 +509,6 @@
   product(bool, EliminateAutoBox, true,                                     \
           "Control optimizations for autobox elimination")                  \
                                                                             \
-  diagnostic(bool, UseImplicitStableValues, true,                           \
-          "Mark well-known stable fields as such (e.g. String.value)")      \
-                                                                            \
   product(intx, AutoBoxCacheMax, 128,                                       \
           "Sets max value cached by the java.lang.Integer autobox cache")   \
           range(0, max_jint)                                                \
@@ -761,16 +758,4 @@
   product(bool, UseProfiledLoopPredicate, true,                             \
           "move predicates out of loops based on profiling data")           \
 
-C2_FLAGS(DECLARE_DEVELOPER_FLAG, \
-         DECLARE_PD_DEVELOPER_FLAG, \
-         DECLARE_PRODUCT_FLAG, \
-         DECLARE_PD_PRODUCT_FLAG, \
-         DECLARE_DIAGNOSTIC_FLAG, \
-         DECLARE_PD_DIAGNOSTIC_FLAG, \
-         DECLARE_EXPERIMENTAL_FLAG, \
-         DECLARE_NOTPRODUCT_FLAG, \
-         IGNORE_RANGE, \
-         IGNORE_CONSTRAINT, \
-         IGNORE_WRITEABLE)
-
-#endif // SHARE_VM_OPTO_C2_GLOBALS_HPP
+#endif // SHARE_OPTO_C2_GLOBALS_HPP

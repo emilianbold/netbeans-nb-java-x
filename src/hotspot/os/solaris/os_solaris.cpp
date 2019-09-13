@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,8 +33,10 @@
 #include "compiler/disassembler.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/allocation.inline.hpp"
 #include "memory/filemap.hpp"
+#include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
 #include "os_share_solaris.hpp"
 #include "os_solaris.inline.hpp"
@@ -992,6 +994,11 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
   } else {
     log_warning(os, thread)("Failed to start thread - thr_create failed (%s) for attributes: %s.",
       os::errno_name(status), describe_thr_create_attributes(buf, sizeof(buf), stack_size, flags));
+    // Log some OS information which might explain why creating the thread failed.
+    log_info(os, thread)("Number of threads approx. running in the VM: %d", Threads::number_of_threads());
+    LogStream st(Log(os, thread)::info());
+    os::Posix::print_rlimit_info(&st);
+    os::print_memory_info(&st);
   }
 
   if (status != 0) {
@@ -1327,8 +1334,15 @@ void os::abort(bool dump_core, void* siginfo, const void* context) {
 }
 
 // Die immediately, no exit hook, no abort hook, no cleanup.
+// Dump a core file, if possible, for debugging.
 void os::die() {
-  ::abort(); // dump core (for debugging)
+  if (TestUnresponsiveErrorHandler && !CreateCoredumpOnCrash) {
+    // For TimeoutInErrorHandlingTest.java, we just kill the VM
+    // and don't take the time to generate a core file.
+    os::signal_raise(SIGKILL);
+  } else {
+    ::abort();
+  }
 }
 
 // DLL functions
@@ -1514,15 +1528,22 @@ void * os::dll_load(const char *filename, char *ebuf, int ebuflen) {
   void * result= ::dlopen(filename, RTLD_LAZY);
   if (result != NULL) {
     // Successful loading
+    Events::log(NULL, "Loaded shared library %s", filename);
     return result;
   }
 
   Elf32_Ehdr elf_head;
+  const char* error_report = ::dlerror();
+  if (error_report == NULL) {
+    error_report = "dlerror returned no error description";
+  }
+  if (ebuf != NULL && ebuflen > 0) {
+    ::strncpy(ebuf, error_report, ebuflen-1);
+    ebuf[ebuflen-1]='\0';
+  }
 
-  // Read system error message into ebuf
-  // It may or may not be overwritten below
-  ::strncpy(ebuf, ::dlerror(), ebuflen-1);
-  ebuf[ebuflen-1]='\0';
+  Events::log(NULL, "Loading shared library %s failed, %s", filename, error_report);
+
   int diag_msg_max_length=ebuflen-strlen(ebuf);
   char* diag_msg_buf=ebuf+strlen(ebuf);
 
@@ -2011,13 +2032,6 @@ void* os::user_handler() {
   return CAST_FROM_FN_PTR(void*, UserHandler);
 }
 
-static struct timespec create_semaphore_timespec(unsigned int sec, int nsec) {
-  struct timespec ts;
-  unpackTime(&ts, false, (sec * NANOSECS_PER_SEC) + nsec);
-
-  return ts;
-}
-
 extern "C" {
   typedef void (*sa_handler_t)(int);
   typedef void (*sa_sigaction_t)(int, siginfo_t *, void *);
@@ -2027,6 +2041,7 @@ void* os::signal(int signal_number, void* handler) {
   struct sigaction sigAct, oldSigAct;
   sigfillset(&(sigAct.sa_mask));
   sigAct.sa_flags = SA_RESTART & ~SA_RESETHAND;
+  sigAct.sa_flags |= SA_SIGINFO;
   sigAct.sa_handler = CAST_TO_FN_PTR(sa_handler_t, handler);
 
   if (sigaction(signal_number, &sigAct, &oldSigAct)) {
@@ -2538,17 +2553,6 @@ char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr, int f
 // available (and not reserved for something else).
 
 char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
-  const int max_tries = 10;
-  char* base[max_tries];
-  size_t size[max_tries];
-
-  // Solaris adds a gap between mmap'ed regions.  The size of the gap
-  // is dependent on the requested size and the MMU.  Our initial gap
-  // value here is just a guess and will be corrected later.
-  bool had_top_overlap = false;
-  bool have_adjusted_gap = false;
-  size_t gap = 0x400000;
-
   // Assert only that the size is a multiple of the page size, since
   // that's all that mmap requires, and since that's all we really know
   // about at this low abstraction level.  If we need higher alignment,
@@ -2557,105 +2561,18 @@ char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
   assert(bytes % os::vm_page_size() == 0, "reserving unexpected size block");
 
   // Since snv_84, Solaris attempts to honor the address hint - see 5003415.
-  // Give it a try, if the kernel honors the hint we can return immediately.
   char* addr = Solaris::anon_mmap(requested_addr, bytes, 0, false);
 
   volatile int err = errno;
   if (addr == requested_addr) {
     return addr;
-  } else if (addr != NULL) {
+  }
+
+  if (addr != NULL) {
     pd_unmap_memory(addr, bytes);
   }
 
-  if (log_is_enabled(Warning, os)) {
-    char buf[256];
-    buf[0] = '\0';
-    if (addr == NULL) {
-      jio_snprintf(buf, sizeof(buf), ": %s", os::strerror(err));
-    }
-    log_info(os)("attempt_reserve_memory_at: couldn't reserve " SIZE_FORMAT " bytes at "
-            PTR_FORMAT ": reserve_memory_helper returned " PTR_FORMAT
-            "%s", bytes, requested_addr, addr, buf);
-  }
-
-  // Address hint method didn't work.  Fall back to the old method.
-  // In theory, once SNV becomes our oldest supported platform, this
-  // code will no longer be needed.
-  //
-  // Repeatedly allocate blocks until the block is allocated at the
-  // right spot. Give up after max_tries.
-  int i;
-  for (i = 0; i < max_tries; ++i) {
-    base[i] = reserve_memory(bytes);
-
-    if (base[i] != NULL) {
-      // Is this the block we wanted?
-      if (base[i] == requested_addr) {
-        size[i] = bytes;
-        break;
-      }
-
-      // check that the gap value is right
-      if (had_top_overlap && !have_adjusted_gap) {
-        size_t actual_gap = base[i-1] - base[i] - bytes;
-        if (gap != actual_gap) {
-          // adjust the gap value and retry the last 2 allocations
-          assert(i > 0, "gap adjustment code problem");
-          have_adjusted_gap = true;  // adjust the gap only once, just in case
-          gap = actual_gap;
-          log_info(os)("attempt_reserve_memory_at: adjusted gap to 0x%lx", gap);
-          unmap_memory(base[i], bytes);
-          unmap_memory(base[i-1], size[i-1]);
-          i-=2;
-          continue;
-        }
-      }
-
-      // Does this overlap the block we wanted? Give back the overlapped
-      // parts and try again.
-      //
-      // There is still a bug in this code: if top_overlap == bytes,
-      // the overlap is offset from requested region by the value of gap.
-      // In this case giving back the overlapped part will not work,
-      // because we'll give back the entire block at base[i] and
-      // therefore the subsequent allocation will not generate a new gap.
-      // This could be fixed with a new algorithm that used larger
-      // or variable size chunks to find the requested region -
-      // but such a change would introduce additional complications.
-      // It's rare enough that the planets align for this bug,
-      // so we'll just wait for a fix for 6204603/5003415 which
-      // will provide a mmap flag to allow us to avoid this business.
-
-      size_t top_overlap = requested_addr + (bytes + gap) - base[i];
-      if (top_overlap >= 0 && top_overlap < bytes) {
-        had_top_overlap = true;
-        unmap_memory(base[i], top_overlap);
-        base[i] += top_overlap;
-        size[i] = bytes - top_overlap;
-      } else {
-        size_t bottom_overlap = base[i] + bytes - requested_addr;
-        if (bottom_overlap >= 0 && bottom_overlap < bytes) {
-          if (bottom_overlap == 0) {
-            log_info(os)("attempt_reserve_memory_at: possible alignment bug");
-          }
-          unmap_memory(requested_addr, bottom_overlap);
-          size[i] = bytes - bottom_overlap;
-        } else {
-          size[i] = bytes;
-        }
-      }
-    }
-  }
-
-  // Give back the unused reserved pieces.
-
-  for (int j = 0; j < i; ++j) {
-    if (base[j] != NULL) {
-      unmap_memory(base[j], size[j]);
-    }
-  }
-
-  return (i < max_tries) ? requested_addr : NULL;
+  return NULL;
 }
 
 bool os::pd_release_memory(char* addr, size_t bytes) {
@@ -2666,6 +2583,7 @@ bool os::pd_release_memory(char* addr, size_t bytes) {
 static bool solaris_mprotect(char* addr, size_t bytes, int prot) {
   assert(addr == (char*)align_down((uintptr_t)addr, os::vm_page_size()),
          "addr must be page aligned");
+  Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+bytes), prot);
   int retVal = mprotect(addr, bytes, prot);
   return retVal == 0;
 }
@@ -2842,43 +2760,6 @@ bool os::can_commit_large_page_memory() {
 
 bool os::can_execute_large_page_memory() {
   return true;
-}
-
-// Read calls from inside the vm need to perform state transitions
-size_t os::read(int fd, void *buf, unsigned int nBytes) {
-  size_t res;
-  JavaThread* thread = (JavaThread*)Thread::current();
-  assert(thread->thread_state() == _thread_in_vm, "Assumed _thread_in_vm");
-  ThreadBlockInVM tbiv(thread);
-  RESTARTABLE(::read(fd, buf, (size_t) nBytes), res);
-  return res;
-}
-
-size_t os::read_at(int fd, void *buf, unsigned int nBytes, jlong offset) {
-  size_t res;
-  JavaThread* thread = (JavaThread*)Thread::current();
-  assert(thread->thread_state() == _thread_in_vm, "Assumed _thread_in_vm");
-  ThreadBlockInVM tbiv(thread);
-  RESTARTABLE(::pread(fd, buf, (size_t) nBytes, offset), res);
-  return res;
-}
-
-size_t os::restartable_read(int fd, void *buf, unsigned int nBytes) {
-  size_t res;
-  assert(((JavaThread*)Thread::current())->thread_state() == _thread_in_native,
-         "Assumed _thread_in_native");
-  RESTARTABLE(::read(fd, buf, (size_t) nBytes), res);
-  return res;
-}
-
-void os::naked_short_sleep(jlong ms) {
-  assert(ms < 1000, "Un-interruptable sleep, short time use only");
-
-  // usleep is deprecated and removed from POSIX, in favour of nanosleep, but
-  // Solaris requires -lrt for this.
-  usleep((ms * 1000));
-
-  return;
 }
 
 // Sleep forever; naked call to OS-specific sleep; use with CAUTION
@@ -3530,7 +3411,7 @@ static bool do_suspend(OSThread* osthread) {
 
   // managed to send the signal and switch to SUSPEND_REQUEST, now wait for SUSPENDED
   while (true) {
-    if (sr_semaphore.timedwait(create_semaphore_timespec(0, 2000 * NANOSECS_PER_MILLISEC))) {
+    if (sr_semaphore.timedwait(2000)) {
       break;
     } else {
       // timeout
@@ -3564,7 +3445,7 @@ static void do_resume(OSThread* osthread) {
 
   while (true) {
     if (sr_notify(osthread) == 0) {
-      if (sr_semaphore.timedwait(create_semaphore_timespec(0, 2 * NANOSECS_PER_MILLISEC))) {
+      if (sr_semaphore.timedwait(2)) {
         if (osthread->sr.is_running()) {
           return;
         }
@@ -4149,6 +4030,9 @@ void os::init(void) {
     Solaris::_pthread_setname_np =  // from 11.3
         (Solaris::pthread_setname_np_func_t)dlsym(handle, "pthread_setname_np");
   }
+
+  // Shared Posix initialization
+  os::Posix::init();
 }
 
 // To install functions for atexit system call
@@ -4255,11 +4139,15 @@ jint os::init_2(void) {
   // Init pset_loadavg function pointer
   init_pset_getloadavg_ptr();
 
+  // Shared Posix initialization
+  os::Posix::init_2();
+
   return JNI_OK;
 }
 
 // Mark the polling page as unreadable
 void os::make_polling_page_unreadable(void) {
+  Events::log(NULL, "Protecting polling page " INTPTR_FORMAT " with PROT_NONE", p2i(_polling_page));
   if (mprotect((char *)_polling_page, page_size, PROT_NONE) != 0) {
     fatal("Could not disable polling page");
   }
@@ -4267,6 +4155,7 @@ void os::make_polling_page_unreadable(void) {
 
 // Mark the polling page as readable
 void os::make_polling_page_readable(void) {
+  Events::log(NULL, "Protecting polling page " INTPTR_FORMAT " with PROT_READ", p2i(_polling_page));
   if (mprotect((char *)_polling_page, page_size, PROT_READ) != 0) {
     fatal("Could not enable polling page");
   }
@@ -5228,6 +5117,72 @@ void Parker::unpark() {
     status = os::Solaris::cond_signal(_cond);
     assert(status == 0, "invariant");
   }
+}
+
+// Platform Monitor implementation
+
+os::PlatformMonitor::PlatformMonitor() {
+  int status = os::Solaris::cond_init(&_cond);
+  assert_status(status == 0, status, "cond_init");
+  status = os::Solaris::mutex_init(&_mutex);
+  assert_status(status == 0, status, "mutex_init");
+}
+
+os::PlatformMonitor::~PlatformMonitor() {
+  int status = os::Solaris::cond_destroy(&_cond);
+  assert_status(status == 0, status, "cond_destroy");
+  status = os::Solaris::mutex_destroy(&_mutex);
+  assert_status(status == 0, status, "mutex_destroy");
+}
+
+void os::PlatformMonitor::lock() {
+  int status = os::Solaris::mutex_lock(&_mutex);
+  assert_status(status == 0, status, "mutex_lock");
+}
+
+void os::PlatformMonitor::unlock() {
+  int status = os::Solaris::mutex_unlock(&_mutex);
+  assert_status(status == 0, status, "mutex_unlock");
+}
+
+bool os::PlatformMonitor::try_lock() {
+  int status = os::Solaris::mutex_trylock(&_mutex);
+  assert_status(status == 0 || status == EBUSY, status, "mutex_trylock");
+  return status == 0;
+}
+
+// Must already be locked
+int os::PlatformMonitor::wait(jlong millis) {
+  assert(millis >= 0, "negative timeout");
+  if (millis > 0) {
+    timestruc_t abst;
+    int ret = OS_TIMEOUT;
+    compute_abstime(&abst, millis);
+    int status = os::Solaris::cond_timedwait(&_cond, &_mutex, &abst);
+    assert_status(status == 0 || status == EINTR ||
+                  status == ETIME || status == ETIMEDOUT,
+                  status, "cond_timedwait");
+    // EINTR acts as spurious wakeup - which is permitted anyway
+    if (status == 0 || status == EINTR) {
+      ret = OS_OK;
+    }
+    return ret;
+  } else {
+    int status = os::Solaris::cond_wait(&_cond, &_mutex);
+    assert_status(status == 0 || status == EINTR,
+                  status, "cond_wait");
+    return OS_OK;
+  }
+}
+
+void os::PlatformMonitor::notify() {
+  int status = os::Solaris::cond_signal(&_cond);
+  assert_status(status == 0, status, "cond_signal");
+}
+
+void os::PlatformMonitor::notify_all() {
+  int status = os::Solaris::cond_broadcast(&_cond);
+  assert_status(status == 0, status, "cond_broadcast");
 }
 
 extern char** environ;

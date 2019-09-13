@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_CODE_DEPENDENCYCONTEXT_HPP
-#define SHARE_VM_CODE_DEPENDENCYCONTEXT_HPP
+#ifndef SHARE_CODE_DEPENDENCYCONTEXT_HPP
+#define SHARE_CODE_DEPENDENCYCONTEXT_HPP
 
 #include "memory/allocation.hpp"
 #include "oops/oop.hpp"
@@ -99,15 +99,15 @@ class DependencyContext : public StackObj {
   // Safepoints are forbidden during DC lifetime. GC can invalidate
   // _dependency_context_addr if it relocates the holder
   // (e.g. CallSiteContext Java object).
-  uint64_t _safepoint_counter;
+  SafepointStateTracker _safepoint_tracker;
 
   DependencyContext(nmethodBucket* volatile* bucket_addr, volatile uint64_t* last_cleanup_addr)
     : _dependency_context_addr(bucket_addr),
       _last_cleanup_addr(last_cleanup_addr),
-      _safepoint_counter(SafepointSynchronize::safepoint_counter()) {}
+      _safepoint_tracker(SafepointSynchronize::safepoint_state_tracker()) {}
 
   ~DependencyContext() {
-    assert(_safepoint_counter == SafepointSynchronize::safepoint_counter(), "safepoint happened");
+    assert(!_safepoint_tracker.safepoint_state_changed(), "must be the same safepoint");
   }
 #else
   DependencyContext(nmethodBucket* volatile* bucket_addr, volatile uint64_t* last_cleanup_addr)
@@ -132,4 +132,4 @@ class DependencyContext : public StackObj {
   bool is_dependent_nmethod(nmethod* nm);
 #endif //PRODUCT
 };
-#endif // SHARE_VM_CODE_DEPENDENCYCONTEXT_HPP
+#endif // SHARE_CODE_DEPENDENCYCONTEXT_HPP

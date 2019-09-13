@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP
 
 #include "memory/allocation.hpp"
 
@@ -33,7 +33,7 @@ public:
     _alloc_shared_gc,   // Allocate common, outside of GCLAB
     _alloc_tlab,        // Allocate TLAB
     _alloc_gclab,       // Allocate GCLAB
-    _ALLOC_LIMIT,
+    _ALLOC_LIMIT
   };
 
   static const char* alloc_type_to_string(Type type) {
@@ -155,4 +155,4 @@ public:
   }
 };
 
-#endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHALLOCREQUEST_HPP

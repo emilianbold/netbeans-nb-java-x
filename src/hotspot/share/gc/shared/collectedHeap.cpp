@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,6 +38,7 @@
 #include "logging/log.hpp"
 #include "memory/metaspace.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "oops/instanceMirrorKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/handles.inline.hpp"
@@ -50,10 +51,6 @@
 #include "utilities/copy.hpp"
 
 class ClassLoaderData;
-
-#ifdef ASSERT
-int CollectedHeap::_fire_out_of_memory_count = 0;
-#endif
 
 size_t CollectedHeap::_filler_array_max_size = 0;
 
@@ -69,7 +66,7 @@ void GCHeapLog::log_heap(CollectedHeap* heap, bool before) {
   }
 
   double timestamp = fetch_timestamp();
-  MutexLockerEx ml(&_mutex, Mutex::_no_safepoint_check_flag);
+  MutexLocker ml(&_mutex, Mutex::_no_safepoint_check_flag);
   int index = compute_log_index();
   _records[index].thread = NULL; // Its the GC thread so it's not that interesting.
   _records[index].timestamp = timestamp;
@@ -83,6 +80,11 @@ void GCHeapLog::log_heap(CollectedHeap* heap, bool before) {
 
   heap->print_on(&st);
   st.print_cr("}");
+}
+
+size_t CollectedHeap::unused() const {
+  MutexLocker ml(Heap_lock);
+  return capacity() - used();
 }
 
 VirtualSpaceSummary CollectedHeap::create_heap_space_summary() {
@@ -134,6 +136,8 @@ void CollectedHeap::print_heap_after_gc() {
   }
 }
 
+void CollectedHeap::print() const { print_on(tty); }
+
 void CollectedHeap::print_on_error(outputStream* st) const {
   st->print_cr("Heap:");
   print_extended_on(st);
@@ -163,11 +167,6 @@ void CollectedHeap::trace_heap_after_gc(const GCTracer* gc_tracer) {
 // feature.
 bool CollectedHeap::supports_concurrent_phase_control() const {
   return false;
-}
-
-const char* const* CollectedHeap::concurrent_phases() const {
-  static const char* const result[] = { NULL };
-  return result;
 }
 
 bool CollectedHeap::request_concurrent_phase(const char* phase) {
@@ -461,21 +460,6 @@ HeapWord* CollectedHeap::allocate_new_tlab(size_t min_size,
   return NULL;
 }
 
-oop CollectedHeap::obj_allocate(Klass* klass, int size, TRAPS) {
-  ObjAllocator allocator(klass, size, THREAD);
-  return allocator.allocate();
-}
-
-oop CollectedHeap::array_allocate(Klass* klass, int size, int length, bool do_zero, TRAPS) {
-  ObjArrayAllocator allocator(klass, size, length, do_zero, THREAD);
-  return allocator.allocate();
-}
-
-oop CollectedHeap::class_allocate(Klass* klass, int size, TRAPS) {
-  ClassAllocator allocator(klass, size, THREAD);
-  return allocator.allocate();
-}
-
 void CollectedHeap::ensure_parsability(bool retire_tlabs) {
   assert(SafepointSynchronize::is_at_safepoint() || !is_init_completed(),
          "Should only be called at a safepoint or at start-up");
@@ -598,4 +582,9 @@ void CollectedHeap::deduplicate_string(oop str) {
 
 size_t CollectedHeap::obj_size(oop obj) const {
   return obj->size();
+}
+
+uint32_t CollectedHeap::hash_oop(oop obj) const {
+  const uintptr_t addr = cast_from_oop<uintptr_t>(obj);
+  return static_cast<uint32_t>(addr >> LogMinObjAlignment);
 }

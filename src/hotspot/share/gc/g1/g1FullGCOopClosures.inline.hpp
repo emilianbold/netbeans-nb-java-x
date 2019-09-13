@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_G1_G1FULLGCOOPCLOSURES_INLINE_HPP
-#define SHARE_VM_GC_G1_G1FULLGCOOPCLOSURES_INLINE_HPP
+#ifndef SHARE_GC_G1_G1FULLGCOOPCLOSURES_INLINE_HPP
+#define SHARE_GC_G1_G1FULLGCOOPCLOSURES_INLINE_HPP
 
 #include "gc/g1/g1Allocator.inline.hpp"
 #include "gc/g1/g1ConcurrentMarkBitMap.inline.hpp"
@@ -31,6 +31,7 @@
 #include "gc/g1/g1FullGCOopClosures.hpp"
 #include "gc/g1/heapRegionRemSet.hpp"
 #include "memory/iterator.inline.hpp"
+#include "memory/universe.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/compressedOops.inline.hpp"
 #include "oops/oop.inline.hpp"
@@ -101,4 +102,4 @@ inline void G1FullKeepAliveClosure::do_oop_work(T* p) {
   _marker->mark_and_push(p);
 }
 
-#endif
+#endif // SHARE_GC_G1_G1FULLGCOOPCLOSURES_INLINE_HPP

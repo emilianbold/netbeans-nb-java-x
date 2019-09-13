@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,6 +42,7 @@ import static org.testng.Assert.fail;
 
 /**
  * @test
+ * @bug 8215510
  * @compile ClassDescTest.java
  * @run testng ClassDescTest
  * @summary unit tests for java.lang.constant.ClassDesc
@@ -175,6 +176,12 @@ public class ClassDescTest extends SymbolicDescTest {
         } catch (IllegalArgumentException e) {
             // good
         }
+        try {
+            cr.arrayType(0);
+            fail("");
+        } catch (IllegalArgumentException e) {
+            // good
+        }
     }
 
     public void testArrayClassDesc() throws ReflectiveOperationException {
@@ -215,7 +222,7 @@ public class ClassDescTest extends SymbolicDescTest {
     }
 
     public void testBadClassDescs() {
-        List<String> badDescriptors = List.of("II", "I;", "Q", "L",
+        List<String> badDescriptors = List.of("II", "I;", "Q", "L", "",
                                               "java.lang.String", "[]", "Ljava/lang/String",
                                               "Ljava.lang.String;", "java/lang/String");
 
@@ -298,5 +305,29 @@ public class ClassDescTest extends SymbolicDescTest {
         String s = "";
         assertEquals(s.resolveConstantDesc(LOOKUP), s);
         assertEquals(s.describeConstable().get(), s);
+    }
+
+    public void testNullNestedClasses() {
+        ClassDesc cd = ClassDesc.of("Bar");
+        try {
+            cd.nested(null);
+            fail("");
+        } catch (NullPointerException e) {
+            // good
+        }
+
+        try {
+            cd.nested("good", null);
+            fail("");
+        } catch (NullPointerException e) {
+            // good
+        }
+
+        try {
+            cd.nested("good", "goodToo", null);
+            fail("");
+        } catch (NullPointerException e) {
+            // good
+        }
     }
 }

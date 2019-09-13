@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2014, 2018, Red Hat Inc. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -514,7 +514,7 @@ address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state,
   // only occur on method entry so emit it only for vtos with step 0.
   if ((EnableJVMCI || UseAOT) && state == vtos && step == 0) {
     Label L;
-    __ ldr(rscratch1, Address(rthread, Thread::pending_exception_offset()));
+    __ ldrb(rscratch1, Address(rthread, JavaThread::pending_monitorenter_offset()));
     __ cbz(rscratch1, L);
     // Clear flag.
     __ strb(zr, Address(rthread, JavaThread::pending_monitorenter_offset()));
@@ -525,7 +525,7 @@ address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state,
 #ifdef ASSERT
     if (EnableJVMCI) {
       Label L;
-      __ ldr(rscratch1, Address(rthread, Thread::pending_exception_offset()));
+      __ ldrb(rscratch1, Address(rthread, JavaThread::pending_monitorenter_offset()));
       __ cbz(rscratch1, L);
       __ stop("unexpected pending monitor in deopt entry");
       __ bind(L);
@@ -886,8 +886,8 @@ void TemplateInterpreterGenerator::generate_fixed_frame(bool native_call) {
   }
 
   // Get mirror and store it in the frame as GC root for this Method*
-  __ load_mirror(rscratch1, rmethod);
-  __ stp(rscratch1, zr, Address(sp, 4 * wordSize));
+  __ load_mirror(r10, rmethod);
+  __ stp(r10, zr, Address(sp, 4 * wordSize));
 
   __ ldr(rcpool, Address(rmethod, Method::const_offset()));
   __ ldr(rcpool, Address(rcpool, ConstMethod::constants_offset()));
@@ -1351,9 +1351,11 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // pass JNIEnv
   __ add(c_rarg0, rthread, in_bytes(JavaThread::jni_environment_offset()));
 
-  // It is enough that the pc() points into the right code
-  // segment. It does not have to be the correct return pc.
-  __ set_last_Java_frame(esp, rfp, (address)NULL, rscratch1);
+  // Set the last Java PC in the frame anchor to be the return address from
+  // the call to the native method: this will allow the debugger to
+  // generate an accurate stack trace.
+  Label native_return;
+  __ set_last_Java_frame(esp, rfp, native_return, rscratch1);
 
   // change thread state
 #ifdef ASSERT
@@ -1374,6 +1376,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
 
   // Call the native method.
   __ blrt(r10, rscratch1);
+  __ bind(native_return);
   __ maybe_isb();
   __ get_method(rmethod);
   // result potentially in r0 or v0
@@ -1886,6 +1889,7 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
   __ restore_locals();
   __ restore_constant_pool_cache();
   __ get_method(rmethod);
+  __ get_dispatch();
 
   // The method data pointer was incremented already during
   // call profiling. We have to restore the mdp for the current bcp.

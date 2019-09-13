@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_OPTO_SUBNODE_HPP
-#define SHARE_VM_OPTO_SUBNODE_HPP
+#ifndef SHARE_OPTO_SUBNODE_HPP
+#define SHARE_OPTO_SUBNODE_HPP
 
 #include "opto/node.hpp"
 #include "opto/opcodes.hpp"
@@ -300,7 +300,7 @@ struct BoolTest {
 // A Node to convert a Condition Codes to a Logical result.
 class BoolNode : public Node {
   virtual uint hash() const;
-  virtual uint cmp( const Node &n ) const;
+  virtual bool cmp( const Node &n ) const;
   virtual uint size_of() const;
 
   // Try to optimize signed integer comparison
@@ -348,6 +348,17 @@ public:
   virtual int Opcode() const;
   const Type *bottom_type() const { return TypeInt::INT; }
   virtual uint ideal_reg() const { return Op_RegI; }
+};
+
+//------------------------------AbsLNode---------------------------------------
+// Absolute value a long.  Since a naive graph involves control flow, we
+// "match" it in the ideal world (so the control flow can be removed).
+class AbsLNode : public AbsNode {
+public:
+  AbsLNode( Node *in1 ) : AbsNode(in1) {}
+  virtual int Opcode() const;
+  const Type *bottom_type() const { return TypeLong::LONG; }
+  virtual uint ideal_reg() const { return Op_RegL; }
 };
 
 //------------------------------AbsFNode---------------------------------------
@@ -502,4 +513,4 @@ public:
   virtual uint ideal_reg() const { return Op_RegI; }
 };
 
-#endif // SHARE_VM_OPTO_SUBNODE_HPP
+#endif // SHARE_OPTO_SUBNODE_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -77,6 +77,7 @@ import java.util.function.BiPredicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import jdk.internal.util.ArraysSupport;
 import sun.nio.ch.FileChannelImpl;
 import sun.nio.fs.AbstractFileSystemProvider;
 
@@ -1608,12 +1609,13 @@ public final class Files {
     }
 
     /**
-     * Tells whether or not a file is considered <em>hidden</em>. The exact
-     * definition of hidden is platform or provider dependent. On UNIX for
-     * example a file is considered to be hidden if its name begins with a
-     * period character ('.'). On Windows a file is considered hidden if it
-     * isn't a directory and the DOS {@link DosFileAttributes#isHidden hidden}
-     * attribute is set.
+     * Tells whether or not a file is considered <em>hidden</em>.
+     *
+     * @apiNote
+     * The exact definition of hidden is platform or provider dependent. On UNIX
+     * for example a file is considered to be hidden if its name begins with a
+     * period character ('.'). On Windows a file is considered hidden if the DOS
+     * {@link DosFileAttributes#isHidden hidden} attribute is set.
      *
      * <p> Depending on the implementation this method may require to access
      * the file system to determine if the file is considered hidden.
@@ -3195,14 +3197,6 @@ public final class Files {
         }
     }
 
-    /**
-     * The maximum size of array to allocate.
-     * Some VMs reserve some header words in an array.
-     * Attempts to allocate larger arrays may result in
-     * OutOfMemoryError: Requested array size exceeds VM limit
-     */
-    private static final int MAX_BUFFER_SIZE = Integer.MAX_VALUE - 8;
-
     private static final jdk.internal.access.JavaLangAccess JLA =
             jdk.internal.access.SharedSecrets.getJavaLangAccess();
 
@@ -3239,13 +3233,10 @@ public final class Files {
                 break;
 
             // one more byte was read; need to allocate a larger buffer
-            if (capacity <= MAX_BUFFER_SIZE - capacity) {
-                capacity = Math.max(capacity << 1, BUFFER_SIZE);
-            } else {
-                if (capacity == MAX_BUFFER_SIZE)
-                    throw new OutOfMemoryError("Required array size too large");
-                capacity = MAX_BUFFER_SIZE;
-            }
+            capacity = Math.max(ArraysSupport.newLength(capacity,
+                                                        1,       /* minimum growth */
+                                                        capacity /* preferred growth */),
+                                BUFFER_SIZE);
             buf = Arrays.copyOf(buf, capacity);
             buf[nread++] = (byte)n;
         }
@@ -3282,7 +3273,7 @@ public final class Files {
             if (sbc instanceof FileChannelImpl)
                 ((FileChannelImpl) sbc).setUninterruptible();
             long size = sbc.size();
-            if (size > (long) MAX_BUFFER_SIZE)
+            if (size > (long) Integer.MAX_VALUE)
                 throw new OutOfMemoryError("Required array size too large");
             return read(in, (int)size);
         }

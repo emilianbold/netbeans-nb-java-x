@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_CLASSFILE_COMPACTHASHTABLE_HPP
-#define SHARE_VM_CLASSFILE_COMPACTHASHTABLE_HPP
+#ifndef SHARE_CLASSFILE_COMPACTHASHTABLE_HPP
+#define SHARE_CLASSFILE_COMPACTHASHTABLE_HPP
 
 #include "oops/array.hpp"
 #include "oops/symbol.hpp"
@@ -100,7 +100,7 @@ public:
   }; // class CompactHashtableWriter::Entry
 
 private:
-  int _num_entries;
+  int _num_entries_written;
   int _num_buckets;
   int _num_empty_buckets;
   int _num_value_only_buckets;
@@ -112,7 +112,7 @@ private:
 
 public:
   // This is called at dump-time only
-  CompactHashtableWriter(int num_buckets, CompactHashtableStats* stats);
+  CompactHashtableWriter(int num_entries, CompactHashtableStats* stats);
   ~CompactHashtableWriter();
 
   void add(unsigned int hash, u4 value);
@@ -120,18 +120,16 @@ public:
 private:
   void allocate_table();
   void dump_table(NumberSeq* summary);
-
-public:
-  void dump(SimpleCompactHashtable *cht, const char* table_name);
-
-  static int default_num_buckets(size_t num_entries) {
-    return default_num_buckets((int)num_entries);
-  }
-  static int default_num_buckets(int num_entries) {
+  static int calculate_num_buckets(int num_entries) {
     int num_buckets = num_entries / SharedSymbolTableBucketSize;
     // calculation of num_buckets can result in zero buckets, we need at least one
     return (num_buckets < 1) ? 1 : num_buckets;
   }
+
+public:
+  void dump(SimpleCompactHashtable *cht, const char* table_name);
+
+  static size_t estimate_size(int num_entries);
 };
 #endif // INCLUDE_CDS
 
@@ -214,13 +212,7 @@ public:
     _entries = 0;
   }
 
-  void init(address base_address, u4 entry_count, u4 bucket_count, u4* buckets, u4* entries) {
-    _base_address = base_address;
-    _bucket_count = bucket_count;
-    _entry_count = entry_count;
-    _buckets = buckets;
-    _entries = entries;
-  }
+  void init(address base_address, u4 entry_count, u4 bucket_count, u4* buckets, u4* entries);
 
   // Read/Write the table's header from/to the CDS archive
   void serialize_header(SerializeClosure* soc) NOT_CDS_RETURN;
@@ -228,6 +220,8 @@ public:
   inline bool empty() {
     return (_entry_count == 0);
   }
+
+  static size_t calculate_header_size();
 };
 
 template <
@@ -428,4 +422,4 @@ public:
   static void put_utf8(outputStream* st, const char* utf8_string, int utf8_length);
 };
 
-#endif // SHARE_VM_CLASSFILE_COMPACTHASHTABLE_HPP
+#endif // SHARE_CLASSFILE_COMPACTHASHTABLE_HPP

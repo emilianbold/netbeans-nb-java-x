@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP
-#define SHARE_VM_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP
+#ifndef SHARE_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP
+#define SHARE_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP
 
 #include "jfr/recorder/storage/jfrMemorySpace.hpp"
 
@@ -346,19 +346,19 @@ inline void process_free_list(Processor& processor, Mspace* mspace, jfr_iter_dir
 template <typename Mspace>
 inline bool ReleaseOp<Mspace>::process(typename Mspace::Type* t) {
   assert(t != NULL, "invariant");
-  if (t->retired() || t->try_acquire(_thread)) {
-    if (t->transient()) {
-      if (_release_full) {
-        mspace_release_full_critical(t, _mspace);
-      } else {
-        mspace_release_free_critical(t, _mspace);
-      }
-      return true;
+  // assumes some means of exclusive access to t
+  if (t->transient()) {
+    if (_release_full) {
+      mspace_release_full_critical(t, _mspace);
+    } else {
+      mspace_release_free_critical(t, _mspace);
     }
-    t->reinitialize();
-    assert(t->empty(), "invariant");
-    t->release(); // publish
+    return true;
   }
+  t->reinitialize();
+  assert(t->empty(), "invariant");
+  assert(!t->retired(), "invariant");
+  t->release(); // publish
   return true;
 }
 
@@ -381,5 +381,4 @@ inline void migrate_outstanding_writes(const T* old, T* new_buffer, size_t used,
   }
 }
 
-#endif // SHARE_VM_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP
-
+#endif // SHARE_JFR_RECORDER_STORAGE_JFRMEMORYSPACE_INLINE_HPP

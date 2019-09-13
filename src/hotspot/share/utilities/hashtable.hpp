@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,14 +22,15 @@
  *
  */
 
-#ifndef SHARE_VM_UTILITIES_HASHTABLE_HPP
-#define SHARE_VM_UTILITIES_HASHTABLE_HPP
+#ifndef SHARE_UTILITIES_HASHTABLE_HPP
+#define SHARE_UTILITIES_HASHTABLE_HPP
 
 #include "memory/allocation.hpp"
 #include "oops/oop.hpp"
 #include "oops/symbol.hpp"
 #include "runtime/handles.hpp"
 #include "utilities/growableArray.hpp"
+#include "utilities/tableStatistics.hpp"
 
 // This is a generic hashtable, designed to be used for the symbol
 // and string tables.
@@ -168,6 +169,8 @@ private:
 
 protected:
 
+  TableRateStatistics _stats_rate;
+
   void initialize(int table_size, int entry_size, int number_of_entries);
 
   // Accessor
@@ -245,6 +248,7 @@ public:
     return this->hash_to_index(compute_hash(name));
   }
 
+  TableStatistics statistics_calculate(T (*literal_load_barrier)(HashtableEntry<T, F>*) = NULL);
   void print_table_statistics(outputStream* st, const char *table_name, T (*literal_load_barrier)(HashtableEntry<T, F>*) = NULL);
 
  protected:
@@ -316,4 +320,4 @@ public:
 };
 
 
-#endif // SHARE_VM_UTILITIES_HASHTABLE_HPP
+#endif // SHARE_UTILITIES_HASHTABLE_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2007, 2008, 2009, 2010, 2011 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -41,6 +41,7 @@
 #include "runtime/atomic.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/jniHandles.inline.hpp"
 #include "runtime/orderAccess.hpp"
@@ -370,14 +371,12 @@ int CppInterpreter::native_entry(Method* method, intptr_t UNUSED, TRAPS) {
   intptr_t result[4 - LogBytesPerWord];
   ffi_call(handler->cif(), (void (*)()) function, result, arguments);
 
-  // Change the thread state back to _thread_in_Java.
+  // Change the thread state back to _thread_in_Java and ensure it
+  // is seen by the GC thread.
   // ThreadStateTransition::transition_from_native() cannot be used
   // here because it does not check for asynchronous exceptions.
   // We have to manage the transition ourself.
-  thread->set_thread_state(_thread_in_native_trans);
-
-  // Make sure new state is visible in the GC thread
-  InterfaceSupport::serialize_thread_state(thread);
+  thread->set_thread_state_fence(_thread_in_native_trans);
 
   // Handle safepoint operations, pending suspend requests,
   // and pending asynchronous exceptions.
@@ -700,11 +699,11 @@ intptr_t* CppInterpreter::calculate_unwind_sp(ZeroStack* stack,
   return stack->sp() + argument_slots;
 }
 
-IRT_ENTRY(void, CppInterpreter::throw_exception(JavaThread* thread,
+JRT_ENTRY(void, CppInterpreter::throw_exception(JavaThread* thread,
                                                 Symbol*     name,
                                                 char*       message))
   THROW_MSG(name, message);
-IRT_END
+JRT_END
 
 InterpreterFrame *InterpreterFrame::build(Method* const method, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;

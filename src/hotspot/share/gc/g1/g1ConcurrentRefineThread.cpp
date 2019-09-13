@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 #include "gc/g1/g1BarrierSet.hpp"
 #include "gc/g1/g1ConcurrentRefine.hpp"
 #include "gc/g1/g1ConcurrentRefineThread.hpp"
+#include "gc/g1/g1DirtyCardQueue.hpp"
 #include "gc/shared/suspendibleThreadSet.hpp"
 #include "logging/log.hpp"
 #include "memory/resourceArea.hpp"
@@ -58,35 +59,35 @@ G1ConcurrentRefineThread::G1ConcurrentRefineThread(G1ConcurrentRefine* cr, uint 
 }
 
 void G1ConcurrentRefineThread::wait_for_completed_buffers() {
-  MutexLockerEx x(_monitor, Mutex::_no_safepoint_check_flag);
+  MonitorLocker ml(_monitor, Mutex::_no_safepoint_check_flag);
   while (!should_terminate() && !is_active()) {
-    _monitor->wait(Mutex::_no_safepoint_check_flag);
+    ml.wait();
   }
 }
 
 bool G1ConcurrentRefineThread::is_active() {
-  DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
+  G1DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
   return is_primary() ? dcqs.process_completed_buffers() : _active;
 }
 
 void G1ConcurrentRefineThread::activate() {
-  MutexLockerEx x(_monitor, Mutex::_no_safepoint_check_flag);
+  MutexLocker x(_monitor, Mutex::_no_safepoint_check_flag);
   if (!is_primary()) {
     set_active(true);
   } else {
-    DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-    dcqs.set_process_completed(true);
+    G1DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
+    dcqs.set_process_completed_buffers(true);
   }
   _monitor->notify();
 }
 
 void G1ConcurrentRefineThread::deactivate() {
-  MutexLockerEx x(_monitor, Mutex::_no_safepoint_check_flag);
+  MutexLocker x(_monitor, Mutex::_no_safepoint_check_flag);
   if (!is_primary()) {
     set_active(false);
   } else {
-    DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-    dcqs.set_process_completed(false);
+    G1DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
+    dcqs.set_process_completed_buffers(false);
   }
 }
 
@@ -139,6 +140,6 @@ void G1ConcurrentRefineThread::run_service() {
 }
 
 void G1ConcurrentRefineThread::stop_service() {
-  MutexLockerEx x(_monitor, Mutex::_no_safepoint_check_flag);
+  MutexLocker x(_monitor, Mutex::_no_safepoint_check_flag);
   _monitor->notify();
 }

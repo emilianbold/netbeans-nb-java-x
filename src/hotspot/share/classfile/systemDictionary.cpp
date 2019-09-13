@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@
 #include "classfile/protectionDomainCache.hpp"
 #include "classfile/resolutionErrors.hpp"
 #include "classfile/stringTable.hpp"
+#include "classfile/symbolTable.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "code/codeCache.hpp"
@@ -56,6 +57,7 @@
 #include "memory/metaspaceClosure.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/instanceKlass.hpp"
 #include "oops/instanceRefKlass.hpp"
@@ -68,10 +70,8 @@
 #include "oops/symbol.hpp"
 #include "oops/typeArrayKlass.hpp"
 #include "prims/jvmtiExport.hpp"
-#include "prims/resolvedMethodTable.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/arguments.hpp"
-#include "runtime/arguments_ext.hpp"
 #include "runtime/biasedLocking.hpp"
 #include "runtime/fieldType.hpp"
 #include "runtime/handles.inline.hpp"
@@ -87,9 +87,6 @@
 #include "utilities/macros.hpp"
 #if INCLUDE_CDS
 #include "classfile/systemDictionaryShared.hpp"
-#endif
-#if INCLUDE_JVMCI
-#include "jvmci/jvmciRuntime.hpp"
 #endif
 #if INCLUDE_JFR
 #include "jfr/jfr.hpp"
@@ -266,7 +263,7 @@ InstanceKlass* SystemDictionary::resolve_instance_class_or_null_helper(Symbol* c
     ResourceMark rm(THREAD);
     // Ignore wrapping L and ;.
     TempNewSymbol name = SymbolTable::new_symbol(class_name->as_C_string() + 1,
-                                   class_name->utf8_length() - 2, CHECK_NULL);
+                                                 class_name->utf8_length() - 2);
     return resolve_instance_class_or_null(name, class_loader, protection_domain, THREAD);
   } else {
     return resolve_instance_class_or_null(class_name, class_loader, protection_domain, THREAD);
@@ -861,8 +858,15 @@ InstanceKlass* SystemDictionary::resolve_instance_class_or_null(Symbol* name,
         check_constraints(d_hash, k, class_loader, false, THREAD);
 
         // Need to check for a PENDING_EXCEPTION again; check_constraints
-        // can throw and doesn't use the CHECK macro.
+        // can throw but we may have to remove entry from the placeholder table below.
         if (!HAS_PENDING_EXCEPTION) {
+          // Record dependency for non-parent delegation.
+          // This recording keeps the defining class loader of the klass (k) found
+          // from being unloaded while the initiating class loader is loaded
+          // even if the reference to the defining class loader is dropped
+          // before references to the initiating class loader.
+          loader_data->record_dependency(k);
+
           { // Grabbing the Compile_lock prevents systemDictionary updates
             // during compilations.
             MutexLocker mu(Compile_lock, THREAD);
@@ -1168,7 +1172,7 @@ InstanceKlass* SystemDictionary::load_shared_boot_class(Symbol* class_name,
                                                         TRAPS) {
   InstanceKlass* ik = SystemDictionaryShared::find_builtin_class(class_name);
   if (ik != NULL && ik->is_shared_boot_class()) {
-    return load_shared_class(ik, Handle(), Handle(), THREAD);
+    return load_shared_class(ik, Handle(), Handle(), NULL, THREAD);
   }
   return NULL;
 }
@@ -1268,7 +1272,9 @@ bool SystemDictionary::is_shared_class_visible(Symbol* class_name,
 
 InstanceKlass* SystemDictionary::load_shared_class(InstanceKlass* ik,
                                                    Handle class_loader,
-                                                   Handle protection_domain, TRAPS) {
+                                                   Handle protection_domain,
+                                                   const ClassFileStream *cfs,
+                                                   TRAPS) {
 
   if (ik != NULL) {
     Symbol* class_name = ik->name();
@@ -1315,7 +1321,7 @@ InstanceKlass* SystemDictionary::load_shared_class(InstanceKlass* ik,
     }
 
     InstanceKlass* new_ik = KlassFactory::check_shared_class_file_load_hook(
-        ik, class_name, class_loader, protection_domain, CHECK_NULL);
+        ik, class_name, class_loader, protection_domain, cfs, CHECK_NULL);
     if (new_ik != NULL) {
       // The class is changed by CFLH. Return the new class. The shared class is
       // not used.
@@ -1788,14 +1794,17 @@ void SystemDictionary::add_to_hierarchy(InstanceKlass* k, TRAPS) {
   assert(k != NULL, "just checking");
   assert_locked_or_safepoint(Compile_lock);
 
-  // Link into hierachy. Make sure the vtables are initialized before linking into
+  k->set_init_state(InstanceKlass::loaded);
+  // make sure init_state store is already done.
+  // The compiler reads the hierarchy outside of the Compile_lock.
+  // Access ordering is used to add to hierarchy.
+
+  // Link into hierachy.
   k->append_to_sibling_list();                    // add to superklass/sibling list
   k->process_interfaces(THREAD);                  // handle all "implements" declarations
-  k->set_init_state(InstanceKlass::loaded);
+
   // Now flush all code that depended on old class hierarchy.
   // Note: must be done *after* linking k into the hierarchy (was bug 12/9/97)
-  // Also, first reinitialize vtable because it may have gotten out of synch
-  // while the new class wasn't connected to the class hierarchy.
   CodeCache::flush_dependents_on(k);
 }
 
@@ -1814,42 +1823,27 @@ bool SystemDictionary::do_unloading(GCTimer* gc_timer) {
     // First, mark for unload all ClassLoaderData referencing a dead class loader.
     unloading_occurred = ClassLoaderDataGraph::do_unloading();
     if (unloading_occurred) {
-      MutexLockerEx ml2(is_concurrent ? Module_lock : NULL);
+      MutexLocker ml2(is_concurrent ? Module_lock : NULL);
       JFR_ONLY(Jfr::on_unloading_classes();)
-      MutexLockerEx ml1(is_concurrent ? SystemDictionary_lock : NULL);
+
+      MutexLocker ml1(is_concurrent ? SystemDictionary_lock : NULL);
       ClassLoaderDataGraph::clean_module_and_package_info();
-    }
-  }
-
-  // Cleanup ResolvedMethodTable even if no unloading occurred.
-  {
-    GCTraceTime(Debug, gc, phases) t("ResolvedMethodTable", gc_timer);
-    ResolvedMethodTable::trigger_cleanup();
-  }
-
-  if (unloading_occurred) {
-    {
-      GCTraceTime(Debug, gc, phases) t("SymbolTable", gc_timer);
-      // Check if there's work to do in the SymbolTable
-      SymbolTable::do_check_concurrent_work();
-    }
-
-    {
-      MutexLockerEx ml(is_concurrent ? SystemDictionary_lock : NULL);
-      GCTraceTime(Debug, gc, phases) t("Dictionary", gc_timer);
       constraints()->purge_loader_constraints();
       resolution_errors()->purge_resolution_errors();
     }
+  }
 
-    {
-      GCTraceTime(Debug, gc, phases) t("ResolvedMethodTable", gc_timer);
-      // Oops referenced by the protection domain cache table may get unreachable independently
-      // of the class loader (eg. cached protection domain oops). So we need to
-      // explicitly unlink them here.
-      // All protection domain oops are linked to the caller class, so if nothing
-      // unloads, this is not needed.
-      _pd_cache_table->trigger_cleanup();
-    }
+  GCTraceTime(Debug, gc, phases) t("Trigger cleanups", gc_timer);
+
+  if (unloading_occurred) {
+    SymbolTable::trigger_cleanup();
+
+    // Oops referenced by the protection domain cache table may get unreachable independently
+    // of the class loader (eg. cached protection domain oops). So we need to
+    // explicitly unlink them here.
+    // All protection domain oops are linked to the caller class, so if nothing
+    // unloads, this is not needed.
+    _pd_cache_table->trigger_cleanup();
   }
 
   return unloading_occurred;
@@ -1926,13 +1920,6 @@ bool SystemDictionary::resolve_wk_klass(WKID id, TRAPS) {
   int sid = wk_init_info[id - FIRST_WKID];
   Symbol* symbol = vmSymbols::symbol_at((vmSymbols::SID)sid);
   InstanceKlass** klassp = &_well_known_klasses[id];
-
-
-#if INCLUDE_JVMCI
-  if (id >= FIRST_JVMCI_WKID) {
-    assert(EnableJVMCI, "resolve JVMCI classes only when EnableJVMCI is true");
-  }
-#endif
 
   if ((*klassp) == NULL) {
     Klass* k = resolve_or_fail(symbol, true, CHECK_0);
@@ -2022,7 +2009,7 @@ void SystemDictionary::resolve_well_known_classes(TRAPS) {
   WKID jsr292_group_end   = WK_KLASS_ENUM_NAME(VolatileCallSite_klass);
   resolve_wk_klasses_until(jsr292_group_start, scan, CHECK);
   resolve_wk_klasses_through(jsr292_group_end, scan, CHECK);
-  WKID last = NOT_JVMCI(WKID_LIMIT) JVMCI_ONLY(FIRST_JVMCI_WKID);
+  WKID last = WKID_LIMIT;
   resolve_wk_klasses_until(last, scan, CHECK);
 
   _box_klasses[T_BOOLEAN] = WK_KLASS(Boolean_klass);
@@ -2118,7 +2105,7 @@ void SystemDictionary::check_constraints(unsigned int d_hash,
         ss.print(" wants to load %s %s.",
                  k->external_kind(), k->external_name());
         Klass *existing_klass = constraints()->find_constrained_klass(name, class_loader);
-        if (existing_klass->class_loader() != class_loader()) {
+        if (existing_klass != NULL && existing_klass->class_loader() != class_loader()) {
           ss.print(" A different %s with the same name was previously loaded by %s. (%s)",
                    existing_klass->external_kind(),
                    existing_klass->class_loader_data()->loader_name_and_id(),
@@ -2177,6 +2164,7 @@ void SystemDictionary::update_dictionary(unsigned int d_hash,
     InstanceKlass* sd_check = find_class(d_hash, name, dictionary);
     if (sd_check == NULL) {
       dictionary->add_klass(d_hash, name, k);
+
       notice_modification();
     }
   #ifdef ASSERT
@@ -2368,7 +2356,7 @@ Symbol* SystemDictionary::check_signature_loaders(Symbol* signature,
   SignatureStream sig_strm(signature, is_method);
   while (!sig_strm.is_done()) {
     if (sig_strm.is_object()) {
-      Symbol* sig = sig_strm.as_symbol(CHECK_NULL);
+      Symbol* sig = sig_strm.as_symbol();
       if (!add_loader_constraint(sig, loader1, loader2, THREAD)) {
         return sig;
       }
@@ -2462,7 +2450,6 @@ methodHandle SystemDictionary::find_method_handle_invoker(Klass* klass,
                                                           Symbol* signature,
                                                           Klass* accessing_klass,
                                                           Handle *appendix_result,
-                                                          Handle *method_type_result,
                                                           TRAPS) {
   methodHandle empty;
   assert(THREAD->can_call_java() ,"");
@@ -2495,7 +2482,6 @@ methodHandle SystemDictionary::find_method_handle_invoker(Klass* klass,
                          vmSymbols::linkMethod_signature(),
                          &args, CHECK_(empty));
   Handle mname(THREAD, (oop) result.get_jobject());
-  (*method_type_result) = method_type;
   return unpack_method_and_appendix(mname, accessing_klass, appendix_box, appendix_result, THREAD);
 }
 
@@ -2640,7 +2626,7 @@ Handle SystemDictionary::find_method_handle_type(Symbol* signature,
       mirror = ss.as_java_mirror(class_loader, protection_domain,
                                  SignatureStream::NCDFError, CHECK_(empty));
     }
-    assert(mirror != NULL, "%s", ss.as_symbol(THREAD)->as_C_string());
+    assert(mirror != NULL, "%s", ss.as_symbol()->as_C_string());
     if (ss.at_return_type())
       rt = Handle(THREAD, mirror);
     else
@@ -2756,108 +2742,61 @@ Handle SystemDictionary::link_method_handle_constant(Klass* caller,
   return Handle(THREAD, (oop) result.get_jobject());
 }
 
-// Ask Java to compute a constant by invoking a BSM given a Dynamic_info CP entry
-Handle SystemDictionary::link_dynamic_constant(Klass* caller,
-                                               int condy_index,
-                                               Handle bootstrap_specifier,
-                                               Symbol* name,
-                                               Symbol* type,
-                                               TRAPS) {
-  Handle empty;
-  Handle bsm, info;
-  if (java_lang_invoke_MethodHandle::is_instance(bootstrap_specifier())) {
-    bsm = bootstrap_specifier;
-  } else {
-    assert(bootstrap_specifier->is_objArray(), "");
-    objArrayOop args = (objArrayOop) bootstrap_specifier();
-    assert(args->length() == 2, "");
-    bsm  = Handle(THREAD, args->obj_at(0));
-    info = Handle(THREAD, args->obj_at(1));
-  }
-  guarantee(java_lang_invoke_MethodHandle::is_instance(bsm()),
-            "caller must supply a valid BSM");
+// Ask Java to run a bootstrap method, in order to create a dynamic call site
+// while linking an invokedynamic op, or compute a constant for Dynamic_info CP entry
+// with linkage results being stored back into the bootstrap specifier.
+void SystemDictionary::invoke_bootstrap_method(BootstrapInfo& bootstrap_specifier, TRAPS) {
+  // Resolve the bootstrap specifier, its name, type, and static arguments
+  bootstrap_specifier.resolve_bsm(CHECK);
 
   // This should not happen.  JDK code should take care of that.
-  if (caller == NULL) {
-    THROW_MSG_(vmSymbols::java_lang_InternalError(), "bad dynamic constant", empty);
+  if (bootstrap_specifier.caller() == NULL || bootstrap_specifier.type_arg().is_null()) {
+    THROW_MSG(vmSymbols::java_lang_InternalError(), "Invalid bootstrap method invocation with no caller or type argument");
   }
 
-  Handle constant_name = java_lang_String::create_from_symbol(name, CHECK_(empty));
+  bool is_indy = bootstrap_specifier.is_method_call();
+  objArrayHandle appendix_box;
+  if (is_indy) {
+    // Some method calls may require an appendix argument.  Arrange to receive it.
+    appendix_box = oopFactory::new_objArray_handle(SystemDictionary::Object_klass(), 1, CHECK);
+    assert(appendix_box->obj_at(0) == NULL, "");
+  }
 
-  // Resolve the constant type in the context of the caller class
-  Handle type_mirror = find_java_mirror_for_type(type, caller, SignatureStream::NCDFError,
-                                                 CHECK_(empty));
-
-  // call java.lang.invoke.MethodHandleNatives::linkConstantDyanmic(caller, condy_index, bsm, type, info)
+  // call condy: java.lang.invoke.MethodHandleNatives::linkDynamicConstant(caller, condy_index, bsm, type, info)
+  //       indy: java.lang.invoke.MethodHandleNatives::linkCallSite(caller, indy_index, bsm, name, mtype, info, &appendix)
   JavaCallArguments args;
-  args.push_oop(Handle(THREAD, caller->java_mirror()));
-  args.push_int(condy_index);
-  args.push_oop(bsm);
-  args.push_oop(constant_name);
-  args.push_oop(type_mirror);
-  args.push_oop(info);
+  args.push_oop(Handle(THREAD, bootstrap_specifier.caller_mirror()));
+  args.push_int(bootstrap_specifier.bss_index());
+  args.push_oop(bootstrap_specifier.bsm());
+  args.push_oop(bootstrap_specifier.name_arg());
+  args.push_oop(bootstrap_specifier.type_arg());
+  args.push_oop(bootstrap_specifier.arg_values());
+  if (is_indy) {
+    args.push_oop(appendix_box);
+  }
   JavaValue result(T_OBJECT);
   JavaCalls::call_static(&result,
                          SystemDictionary::MethodHandleNatives_klass(),
-                         vmSymbols::linkDynamicConstant_name(),
-                         vmSymbols::linkDynamicConstant_signature(),
-                         &args, CHECK_(empty));
+                         is_indy ? vmSymbols::linkCallSite_name() : vmSymbols::linkDynamicConstant_name(),
+                         is_indy ? vmSymbols::linkCallSite_signature() : vmSymbols::linkDynamicConstant_signature(),
+                         &args, CHECK);
 
-  return Handle(THREAD, (oop) result.get_jobject());
-}
-
-// Ask Java code to find or construct a java.lang.invoke.CallSite for the given
-// name and signature, as interpreted relative to the given class loader.
-methodHandle SystemDictionary::find_dynamic_call_site_invoker(Klass* caller,
-                                                              int indy_index,
-                                                              Handle bootstrap_specifier,
-                                                              Symbol* name,
-                                                              Symbol* type,
-                                                              Handle *appendix_result,
-                                                              Handle *method_type_result,
-                                                              TRAPS) {
-  methodHandle empty;
-  Handle bsm, info;
-  if (java_lang_invoke_MethodHandle::is_instance(bootstrap_specifier())) {
-    bsm = bootstrap_specifier;
+  Handle value(THREAD, (oop) result.get_jobject());
+  if (is_indy) {
+    Handle appendix;
+    methodHandle method = unpack_method_and_appendix(value,
+                                                     bootstrap_specifier.caller(),
+                                                     appendix_box,
+                                                     &appendix, CHECK);
+    bootstrap_specifier.set_resolved_method(method, appendix);
   } else {
-    objArrayOop args = (objArrayOop) bootstrap_specifier();
-    assert(args->length() == 2, "");
-    bsm  = Handle(THREAD, args->obj_at(0));
-    info = Handle(THREAD, args->obj_at(1));
-  }
-  guarantee(java_lang_invoke_MethodHandle::is_instance(bsm()),
-            "caller must supply a valid BSM");
-
-  Handle method_name = java_lang_String::create_from_symbol(name, CHECK_(empty));
-  Handle method_type = find_method_handle_type(type, caller, CHECK_(empty));
-
-  // This should not happen.  JDK code should take care of that.
-  if (caller == NULL || method_type.is_null()) {
-    THROW_MSG_(vmSymbols::java_lang_InternalError(), "bad invokedynamic", empty);
+    bootstrap_specifier.set_resolved_value(value);
   }
 
-  objArrayHandle appendix_box = oopFactory::new_objArray_handle(SystemDictionary::Object_klass(), 1, CHECK_(empty));
-  assert(appendix_box->obj_at(0) == NULL, "");
-
-  // call java.lang.invoke.MethodHandleNatives::linkCallSite(caller, indy_index, bsm, name, mtype, info, &appendix)
-  JavaCallArguments args;
-  args.push_oop(Handle(THREAD, caller->java_mirror()));
-  args.push_int(indy_index);
-  args.push_oop(bsm);
-  args.push_oop(method_name);
-  args.push_oop(method_type);
-  args.push_oop(info);
-  args.push_oop(appendix_box);
-  JavaValue result(T_OBJECT);
-  JavaCalls::call_static(&result,
-                         SystemDictionary::MethodHandleNatives_klass(),
-                         vmSymbols::linkCallSite_name(),
-                         vmSymbols::linkCallSite_signature(),
-                         &args, CHECK_(empty));
-  Handle mname(THREAD, (oop) result.get_jobject());
-  (*method_type_result) = method_type;
-  return unpack_method_and_appendix(mname, caller, appendix_box, appendix_result, THREAD);
+  // sanity check
+  assert(bootstrap_specifier.is_resolved() ||
+         (bootstrap_specifier.is_method_call() &&
+          bootstrap_specifier.resolved_method().not_null()), "bootstrap method call failed");
 }
 
 // Protection domain cache table handling
@@ -2886,6 +2825,8 @@ void SystemDictionary::print_on(outputStream *st) {
   st->cr();
 }
 
+void SystemDictionary::print() { print_on(tty); }
+
 void SystemDictionary::verify() {
   guarantee(constraints() != NULL,
             "Verify of loader constraints failed");
@@ -2912,11 +2853,26 @@ void SystemDictionary::dump(outputStream *st, bool verbose) {
     print_on(st);
   } else {
     CDS_ONLY(SystemDictionaryShared::print_table_statistics(st));
-    ClassLoaderDataGraph::print_dictionary_statistics(st);
+    ClassLoaderDataGraph::print_table_statistics(st);
     placeholders()->print_table_statistics(st, "Placeholder Table");
     constraints()->print_table_statistics(st, "LoaderConstraints Table");
-    _pd_cache_table->print_table_statistics(st, "ProtectionDomainCache Table");
+    pd_cache_table()->print_table_statistics(st, "ProtectionDomainCache Table");
   }
+}
+
+TableStatistics SystemDictionary::placeholders_statistics() {
+  MutexLocker ml(SystemDictionary_lock);
+  return placeholders()->statistics_calculate();
+}
+
+TableStatistics SystemDictionary::loader_constraints_statistics() {
+  MutexLocker ml(SystemDictionary_lock);
+  return constraints()->statistics_calculate();
+}
+
+TableStatistics SystemDictionary::protection_domain_cache_statistics() {
+  MutexLocker ml(SystemDictionary_lock);
+  return pd_cache_table()->statistics_calculate();
 }
 
 // Utility for dumping dictionaries.

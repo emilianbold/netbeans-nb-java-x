@@ -835,9 +835,8 @@ public class JavaCompiler {
      */
     public void readSourceFile(JCCompilationUnit tree, ClassSymbol c) throws CompletionFailure {
         if (completionFailureName == c.fullname) {
-            JCDiagnostic msg =
-                    diagFactory.fragment(Fragments.UserSelectedCompletionFailure);
-            throw new CompletionFailure(c, msg, dcfh);
+            throw new CompletionFailure(
+                c, () -> diagFactory.fragment(Fragments.UserSelectedCompletionFailure), dcfh);
         }
         JavaFileObject filename = c.classfile;
 
@@ -872,7 +871,7 @@ public class JavaCompiler {
         // have enough modules available to access java.lang, and
         // so risk getting FatalError("no.java.lang") from MemberEnter.
         if (!modules.enter(List.of(tree), c)) {
-            throw new CompletionFailure(c, diags.fragment(Fragments.CantResolveModules), dcfh);
+            throw new CompletionFailure(c, () -> diags.fragment(Fragments.CantResolveModules), dcfh);
         }
 
         enter.complete(List.of(tree), c);
@@ -1066,6 +1065,8 @@ public class JavaCompiler {
             if (!log.hasDiagnosticListener()) {
                 printCount("error", errorCount());
                 printCount("warn", warningCount());
+                printSuppressedCount(errorCount(), log.nsuppressederrors, "count.error.recompile");
+                printSuppressedCount(warningCount(), log.nsuppressedwarns, "count.warn.recompile");
             }
             if (!taskListener.isEmpty()) {
                 taskListener.finished(new TaskEvent(TaskEvent.Kind.COMPILATION));
@@ -1090,7 +1091,11 @@ public class JavaCompiler {
      * Parses a list of files.
      */
    public List<JCCompilationUnit> parseFiles(Iterable<JavaFileObject> fileObjects) {
-       if (shouldStop(CompileState.PARSE))
+       return parseFiles(fileObjects, false);
+   }
+
+   public List<JCCompilationUnit> parseFiles(Iterable<JavaFileObject> fileObjects, boolean force) {
+       if (!force && shouldStop(CompileState.PARSE))
            return List.nil();
 
         //parse all files
@@ -1877,7 +1882,7 @@ public class JavaCompiler {
     private Name parseAndGetName(JavaFileObject fo,
                                  Function<JCTree.JCCompilationUnit, Name> tree2Name) {
         DiagnosticHandler dh = new DiscardDiagnosticHandler(log);
-        JavaFileObject prev = log.useSource(fo);
+        JavaFileObject prevSource = log.useSource(fo);
         try {
             JCTree.JCCompilationUnit t = parse(fo, fo.getCharContent(false));
             return tree2Name.apply(t);
@@ -1885,7 +1890,7 @@ public class JavaCompiler {
             return null;
         } finally {
             log.popDiagnosticHandler(dh);
-            log.useSource(prev);
+            log.useSource(prevSource);
         }
     }
 
@@ -1960,6 +1965,15 @@ public class JavaCompiler {
             else
                 key = "count." + kind + ".plural";
             log.printLines(WriterKind.ERROR, key, String.valueOf(count));
+            log.flush(Log.WriterKind.ERROR);
+        }
+    }
+
+    private void printSuppressedCount(int shown, int suppressed, String diagKey) {
+        if (suppressed > 0) {
+            int total = shown + suppressed;
+            log.printLines(WriterKind.ERROR, diagKey,
+                    String.valueOf(shown), String.valueOf(total));
             log.flush(Log.WriterKind.ERROR);
         }
     }

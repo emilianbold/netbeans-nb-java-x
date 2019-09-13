@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,12 +35,15 @@
 #include "jvmci/compilerRuntime.hpp"
 #include "jvmci/jvmciRuntime.hpp"
 #include "memory/allocation.inline.hpp"
+#include "memory/universe.hpp"
+#include "oops/compressedOops.hpp"
 #include "oops/method.inline.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/os.hpp"
 #include "runtime/safepointVerifiers.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/vmOperations.hpp"
+#include "utilities/sizes.hpp"
 
 bool AOTLib::_narrow_oop_shift_initialized = false;
 int  AOTLib::_narrow_oop_shift = 0;
@@ -395,7 +398,7 @@ void AOTCodeHeap::register_stubs() {
     int code_id = stub_offsets[i]._code_id;
     assert(code_id < _method_count, "sanity");
     jlong* state_adr = &_method_state[code_id];
-    int len = build_u2_from((address)stub_name);
+    int len = Bytes::get_Java_u2((address)stub_name);
     stub_name += 2;
     char* full_name = NEW_C_HEAP_ARRAY(char, len+5, mtCode);
     if (full_name == NULL) { // No memory?
@@ -576,8 +579,8 @@ void AOTCodeHeap::link_global_lib_symbols() {
     SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_heap_top_address", address, (heap->supports_inline_contig_alloc() ? heap->top_addr() : NULL));
     SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_heap_end_address", address, (heap->supports_inline_contig_alloc() ? heap->end_addr() : NULL));
     SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_polling_page", address, os::get_polling_page());
-    SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_narrow_klass_base_address", address, Universe::narrow_klass_base());
-    SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_narrow_oop_base_address", address, Universe::narrow_oop_base());
+    SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_narrow_klass_base_address", address, CompressedKlassPointers::base());
+    SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_narrow_oop_base_address", address, CompressedOops::base());
 #if INCLUDE_G1GC
     SET_AOT_GLOBAL_SYMBOL_VALUE("_aot_log_of_heap_region_grain_bytes", int, HeapRegion::LogOfHRGrainBytes);
 #endif
@@ -606,10 +609,10 @@ void AOTCodeHeap::print_statistics() {
 #endif
 
 Method* AOTCodeHeap::find_method(Klass* klass, Thread* thread, const char* method_name) {
-  int method_name_len = build_u2_from((address)method_name);
+  int method_name_len = Bytes::get_Java_u2((address)method_name);
   method_name += 2;
   const char* signature_name = method_name + method_name_len;
-  int signature_name_len = build_u2_from((address)signature_name);
+  int signature_name_len = Bytes::get_Java_u2((address)signature_name);
   signature_name += 2;
   // The class should have been loaded so the method and signature should already be
   // in the symbol table.  If they're not there, the method doesn't exist.
@@ -687,6 +690,30 @@ bool AOTCodeHeap::is_dependent_method(Klass* dependee, AOTCompiledMethod* aot) {
     }
   }
   return false;
+}
+
+void AOTCodeHeap::mark_evol_dependent_methods(InstanceKlass* dependee) {
+  AOTKlassData* klass_data = find_klass(dependee);
+  if (klass_data == NULL) {
+    return; // no AOT records for this class - no dependencies
+  }
+  if (!dependee->has_passed_fingerprint_check()) {
+    return; // different class
+  }
+
+  int methods_offset = klass_data->_dependent_methods_offset;
+  if (methods_offset >= 0) {
+    address methods_cnt_adr = _dependencies + methods_offset;
+    int methods_cnt = *(int*)methods_cnt_adr;
+    int* indexes = (int*)(methods_cnt_adr + 4);
+    for (int i = 0; i < methods_cnt; ++i) {
+      int code_id = indexes[i];
+      AOTCompiledMethod* aot = _code_to_aot[code_id]._aot;
+      if (aot != NULL) {
+        aot->mark_for_deoptimization(false);
+      }
+    }
+  }
 }
 
 void AOTCodeHeap::sweep_dependent_methods(int* indexes, int methods_cnt) {
@@ -821,7 +848,7 @@ bool AOTCodeHeap::load_klass_data(InstanceKlass* ik, Thread* thread) {
       method_data->_metadata_table = (address)_metadata_got + method_offsets->_metadata_got_offset;
       method_data->_metadata_size  = method_offsets->_metadata_got_size;
       // aot_name format: "<u2_size>Ljava/lang/ThreadGroup;<u2_size>addUnstarted<u2_size>()V"
-      int klass_len = build_u2_from((address)aot_name);
+      int klass_len = Bytes::get_Java_u2((address)aot_name);
       const char* method_name = aot_name + 2 + klass_len;
       Method* m = AOTCodeHeap::find_method(ik, thread, method_name);
       methodHandle mh(thread, m);
@@ -906,13 +933,13 @@ void AOTCodeHeap::oops_do(OopClosure* f) {
 // Scan only klasses_got cells which should have only Klass*,
 // metadata_got cells are scanned only for alive AOT methods
 // by AOTCompiledMethod::metadata_do().
-void AOTCodeHeap::got_metadata_do(void f(Metadata*)) {
+void AOTCodeHeap::got_metadata_do(MetadataClosure* f) {
   for (int i = 1; i < _klasses_got_size; i++) {
     Metadata** p = &_klasses_got[i];
     Metadata* md = *p;
     if (md == NULL)  continue;  // skip non-oops
     if (Metaspace::contains(md)) {
-      f(md);
+      f->do_metadata(md);
     } else {
       intptr_t meta = (intptr_t)md;
       fatal("Invalid value in _klasses_got[%d] = " INTPTR_FORMAT, i, meta);
@@ -944,7 +971,7 @@ int AOTCodeHeap::verify_icholder_relocations() {
 }
 #endif
 
-void AOTCodeHeap::metadata_do(void f(Metadata*)) {
+void AOTCodeHeap::metadata_do(MetadataClosure* f) {
   for (int index = 0; index < _method_count; index++) {
     if (_code_to_aot[index]._state != in_use) {
       continue; // Skip uninitialized entries.

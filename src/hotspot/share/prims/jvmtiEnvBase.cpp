@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
 
 #include "precompiled.hpp"
 #include "classfile/classLoaderDataGraph.hpp"
+#include "classfile/moduleEntry.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "jvmtifiles/jvmtiEnv.hpp"
 #include "memory/resourceArea.hpp"
@@ -41,6 +42,7 @@
 #include "runtime/biasedLocking.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/jfieldIDWorkaround.hpp"
 #include "runtime/jniHandles.inline.hpp"
@@ -1081,7 +1083,7 @@ JvmtiEnvBase::get_object_monitor_usage(JavaThread* calling_thread, jobject objec
           // If the monitor has no owner, then a non-suspended contending
           // thread could potentially change the state of the monitor by
           // entering it. The JVM/TI spec doesn't allow this.
-          if (owning_thread == NULL && !at_safepoint &
+          if (owning_thread == NULL && !at_safepoint &&
               !pending_thread->is_thread_fully_suspended(true, &debug_bits)) {
             if (ret.owner != NULL) {
               destroy_jni_reference(calling_thread, ret.owner);

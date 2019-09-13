@@ -25,11 +25,13 @@
  * @test
  * @bug 8211901
  * @summary  javadoc generates broken links on deprecated items page
- * @library  ../lib
+ * @library  ../../lib
  * @modules  jdk.javadoc/jdk.javadoc.internal.tool
- * @build    JavadocTester
+ * @build    javadoc.tester.*
  * @run main TestOverriddenDeprecatedMethods
  */
+
+import javadoc.tester.JavadocTester;
 
 public class TestOverriddenDeprecatedMethods extends JavadocTester {
 
@@ -39,7 +41,7 @@ public class TestOverriddenDeprecatedMethods extends JavadocTester {
     }
 
     @Test
-    void test() {
+    public void test() {
         javadoc("-d", "out-deprecated",
                 "-sourcepath", testSrc,
                 "--override-methods","summary",
@@ -55,9 +57,11 @@ public class TestOverriddenDeprecatedMethods extends JavadocTester {
 
         checkOrder("pkg1/SubClass.html",
                 "Method Detail",
-                "@Deprecated\npublic&nbsp;void&nbsp;func1()",
+                "<span class=\"annotations\">@Deprecated\n</span><span class=\"modifiers\">public</span>&nbsp;"
+                + "<span class=\"returnType\">void</span>&nbsp;<span class=\"memberName\">func1</span>()",
                 "<div class=\"deprecationBlock\"><span class=\"deprecatedLabel\">Deprecated.</span></div>",
-                "@Deprecated\npublic&nbsp;void&nbsp;func2()",
+                "<span class=\"annotations\">@Deprecated\n</span><span class=\"modifiers\">public</span>&nbsp;"
+                + "<span class=\"returnType\">void</span>&nbsp;<span class=\"memberName\">func2</span>()",
                 "<div class=\"deprecationBlock\"><span class=\"deprecatedLabel\">Deprecated.</span></div>",
                 "<div class=\"block\">deprecated with comments</div>");
     }

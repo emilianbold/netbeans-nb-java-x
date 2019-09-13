@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_G1_HEAPREGIONREMSET_HPP
-#define SHARE_VM_GC_G1_HEAPREGIONREMSET_HPP
+#ifndef SHARE_GC_G1_HEAPREGIONREMSET_HPP
+#define SHARE_GC_G1_HEAPREGIONREMSET_HPP
 
 #include "gc/g1/g1CodeCacheRemSet.hpp"
 #include "gc/g1/g1FromCardCache.hpp"
@@ -179,6 +179,7 @@ private:
 public:
   HeapRegionRemSet(G1BlockOffsetTable* bot, HeapRegion* hr);
 
+  // Setup sparse and fine-grain tables sizes.
   static void setup_remset_size();
 
   bool cardset_is_empty() const {
@@ -194,7 +195,7 @@ public:
   }
 
   size_t occupied() {
-    MutexLockerEx x(&_m, Mutex::_no_safepoint_check_flag);
+    MutexLocker x(&_m, Mutex::_no_safepoint_check_flag);
     return occupied_locked();
   }
   size_t occupied_locked() {
@@ -274,7 +275,7 @@ public:
   // The actual # of bytes this hr_remset takes up.
   // Note also includes the strong code root set.
   size_t mem_size() {
-    MutexLockerEx x(&_m, Mutex::_no_safepoint_check_flag);
+    MutexLocker x(&_m, Mutex::_no_safepoint_check_flag);
     return _other_regions.mem_size()
       // This correction is necessary because the above includes the second
       // part.
@@ -404,4 +405,4 @@ public:
   }
 };
 
-#endif // SHARE_VM_GC_G1_HEAPREGIONREMSET_HPP
+#endif // SHARE_GC_G1_HEAPREGIONREMSET_HPP

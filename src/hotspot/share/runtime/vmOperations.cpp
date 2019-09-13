@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,14 @@
 #include "classfile/vmSymbols.hpp"
 #include "code/codeCache.hpp"
 #include "compiler/compileBroker.hpp"
+#include "gc/shared/collectedHeap.hpp"
 #include "gc/shared/isGCActiveMark.hpp"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
+#include "logging/logConfiguration.hpp"
 #include "memory/heapInspection.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "oops/symbol.hpp"
 #include "runtime/arguments.hpp"
 #include "runtime/deoptimization.hpp"
@@ -333,8 +336,7 @@ void VM_ThreadDump::doit() {
       if (_with_locked_synchronizers) {
         tcl = concurrent_locks.thread_concurrent_locks(jt);
       }
-      ThreadSnapshot* ts = snapshot_thread(jt, tcl);
-      _result->add_thread_snapshot(ts);
+      snapshot_thread(jt, tcl);
     }
   } else {
     // Snapshot threads in the given _threads array
@@ -345,7 +347,7 @@ void VM_ThreadDump::doit() {
       if (th() == NULL) {
         // skip if the thread doesn't exist
         // Add a dummy snapshot
-        _result->add_thread_snapshot(new ThreadSnapshot());
+        _result->add_thread_snapshot();
         continue;
       }
 
@@ -362,24 +364,22 @@ void VM_ThreadDump::doit() {
           jt->is_exiting() ||
           jt->is_hidden_from_external_view())  {
         // add a NULL snapshot if skipped
-        _result->add_thread_snapshot(new ThreadSnapshot());
+        _result->add_thread_snapshot();
         continue;
       }
       ThreadConcurrentLocks* tcl = NULL;
       if (_with_locked_synchronizers) {
         tcl = concurrent_locks.thread_concurrent_locks(jt);
       }
-      ThreadSnapshot* ts = snapshot_thread(jt, tcl);
-      _result->add_thread_snapshot(ts);
+      snapshot_thread(jt, tcl);
     }
   }
 }
 
-ThreadSnapshot* VM_ThreadDump::snapshot_thread(JavaThread* java_thread, ThreadConcurrentLocks* tcl) {
-  ThreadSnapshot* snapshot = new ThreadSnapshot(_result->t_list(), java_thread);
+void VM_ThreadDump::snapshot_thread(JavaThread* java_thread, ThreadConcurrentLocks* tcl) {
+  ThreadSnapshot* snapshot = _result->add_thread_snapshot(java_thread);
   snapshot->dump_stack_at_safepoint(_max_depth, _with_locked_monitors);
   snapshot->set_concurrent_locks(tcl);
-  return snapshot;
 }
 
 volatile bool VM_Exit::_vm_exited = false;
@@ -438,7 +438,20 @@ int VM_Exit::wait_for_threads_in_native_to_block() {
       if (thr!=thr_cur && thr->thread_state() == _thread_in_native) {
         num_active++;
         if (thr->is_Compiler_thread()) {
+#if INCLUDE_JVMCI
+          CompilerThread* ct = (CompilerThread*) thr;
+          if (ct->compiler() == NULL || !ct->compiler()->is_jvmci()) {
+            num_active_compiler_thread++;
+          } else {
+            // A JVMCI compiler thread never accesses VM data structures
+            // while in _thread_in_native state so there's no need to wait
+            // for it and potentially add a 300 millisecond delay to VM
+            // shutdown.
+            num_active--;
+          }
+#else
           num_active_compiler_thread++;
+#endif
         }
       }
     }
@@ -453,12 +466,22 @@ int VM_Exit::wait_for_threads_in_native_to_block() {
 
     attempts++;
 
-    MutexLockerEx ml(&timer, Mutex::_no_safepoint_check_flag);
-    timer.wait(Mutex::_no_safepoint_check_flag, 10);
+    MonitorLocker ml(&timer, Mutex::_no_safepoint_check_flag);
+    ml.wait(10);
   }
 }
 
 void VM_Exit::doit() {
+
+  if (VerifyBeforeExit) {
+    HandleMark hm(VMThread::vm_thread());
+    // Among other things, this ensures that Eden top is correct.
+    Universe::heap()->prepare_for_verify();
+    // Silent verification so as not to pollute normal output,
+    // unless we really asked for it.
+    Universe::verify();
+  }
+
   CompileBroker::set_should_block();
 
   // Wait for a short period for threads in native to block. Any thread
@@ -470,9 +493,16 @@ void VM_Exit::doit() {
 
   set_vm_exited();
 
+  // We'd like to call IdealGraphPrinter::clean_up() to finalize the
+  // XML logging, but we can't safely do that here. The logic to make
+  // XML termination logging safe is tied to the termination of the
+  // VMThread, and it doesn't terminate on this exit path. See 8222534.
+
   // cleanup globals resources before exiting. exit_globals() currently
   // cleans up outputStream resources and PerfMemory resources.
   exit_globals();
+
+  LogConfiguration::finalize();
 
   // Check for exit hook
   exit_hook_t exit_hook = Arguments::exit_hook();

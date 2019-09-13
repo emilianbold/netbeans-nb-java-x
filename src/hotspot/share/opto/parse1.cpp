@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -524,7 +524,6 @@ Parse::Parse(JVMState* caller, ciMethod* parse_method, float expected_uses)
   if (depth() == 1) {
     assert(C->is_osr_compilation() == this->is_osr_parse(), "OSR in sync");
     if (C->tf() != tf()) {
-      MutexLockerEx ml(Compile_lock, Mutex::_no_safepoint_check_flag);
       assert(C->env()->system_dictionary_modification_counter_changed(),
              "Must invalidate if TypeFuncs differ");
     }
@@ -585,6 +584,11 @@ Parse::Parse(JVMState* caller, ciMethod* parse_method, float expected_uses)
   }
 
   if (depth() == 1 && !failing()) {
+    if (C->clinit_barrier_on_entry()) {
+      // Add check to deoptimize the nmethod once the holder class is fully initialized
+      clinit_deopt();
+    }
+
     // Add check to deoptimize the nmethod if RTM state was changed
     rtm_deopt();
   }
@@ -1029,6 +1033,8 @@ void Parse::do_exits() {
     // transform each slice of the original memphi:
     mms.set_memory(_gvn.transform(mms.memory()));
   }
+  // Clean up input MergeMems created by transforming the slices
+  _gvn.transform(_exits.merged_memory());
 
   if (tf()->range()->cnt() > TypeFunc::Parms) {
     const Type* ret_type = tf()->range()->field_at(TypeFunc::Parms);
@@ -1041,7 +1047,6 @@ void Parse::do_exits() {
       // not compilable. Just using an assertion instead would be dangerous
       // as this could lead to an infinite compile loop in non-debug builds.
       {
-        MutexLockerEx ml(Compile_lock, Mutex::_no_safepoint_check_flag);
         if (C->env()->system_dictionary_modification_counter_changed()) {
           C->record_failure(C2Compiler::retry_class_loading_during_parsing());
         } else {
@@ -1192,7 +1197,7 @@ SafePointNode* Parse::create_entry_map() {
 // The main thing to do is lock the receiver of a synchronized method.
 void Parse::do_method_entry() {
   set_parse_bci(InvocationEntryBci); // Pseudo-BCP
-  set_sp(0);                      // Java Stack Pointer
+  set_sp(0);                         // Java Stack Pointer
 
   NOT_PRODUCT( count_compiled_calls(true/*at_method_entry*/, false/*is_inline*/); )
 
@@ -2102,11 +2107,24 @@ void Parse::call_register_finalizer() {
   set_control( _gvn.transform(result_rgn) );
 }
 
+// Add check to deoptimize once holder klass is fully initialized.
+void Parse::clinit_deopt() {
+  assert(C->has_method(), "only for normal compilations");
+  assert(depth() == 1, "only for main compiled method");
+  assert(is_normal_parse(), "no barrier needed on osr entry");
+  assert(!method()->holder()->is_not_initialized(), "initialization should have been started");
+
+  set_parse_bci(0);
+
+  Node* holder = makecon(TypeKlassPtr::make(method()->holder()));
+  guard_klass_being_initialized(holder);
+}
+
 // Add check to deoptimize if RTM state is not ProfileRTM
 void Parse::rtm_deopt() {
 #if INCLUDE_RTM_OPT
   if (C->profile_rtm()) {
-    assert(C->method() != NULL, "only for normal compilations");
+    assert(C->has_method(), "only for normal compilations");
     assert(!C->method()->method_data()->is_empty(), "MDO is needed to record RTM state");
     assert(depth() == 1, "generate check only for main compiled method");
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@
 #include "classfile/classLoaderDataGraph.inline.hpp"
 #include "classfile/dictionary.hpp"
 #include "classfile/javaClasses.hpp"
+#include "classfile/moduleEntry.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "gc/shared/collectedHeap.inline.hpp"
@@ -38,6 +39,7 @@
 #include "memory/metaspaceShared.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "oops/compressedOops.inline.hpp"
 #include "oops/instanceKlass.hpp"
 #include "oops/klass.inline.hpp"
@@ -159,11 +161,6 @@ void Klass::initialize(TRAPS) {
   ShouldNotReachHere();
 }
 
-bool Klass::compute_is_subtype_of(Klass* k) {
-  assert(k->is_klass(), "argument must be a class");
-  return is_subclass_of(k);
-}
-
 Klass* Klass::find_field(Symbol* name, Symbol* sig, fieldDescriptor* fd) const {
 #ifdef ASSERT
   tty->print_cr("Error: find_field called on a klass oop."
@@ -236,11 +233,6 @@ bool Klass::can_be_primary_super_slow() const {
 }
 
 void Klass::initialize_supers(Klass* k, Array<InstanceKlass*>* transitive_interfaces, TRAPS) {
-  if (FastSuperclassLimit == 0) {
-    // None of the other machinery matters.
-    set_super(k);
-    return;
-  }
   if (k == NULL) {
     set_super(NULL);
     _primary_supers[0] = this;
@@ -533,7 +525,8 @@ void Klass::metaspace_pointers_do(MetaspaceClosure* it) {
 }
 
 void Klass::remove_unshareable_info() {
-  assert (DumpSharedSpaces, "only called for DumpSharedSpaces");
+  assert (DumpSharedSpaces || DynamicDumpSharedSpaces,
+          "only called during CDS dump time");
   JFR_ONLY(REMOVE_ID(this);)
   if (log_is_enabled(Trace, cds, unshareable)) {
     ResourceMark rm;
@@ -550,7 +543,7 @@ void Klass::remove_unshareable_info() {
 }
 
 void Klass::remove_java_mirror() {
-  assert (DumpSharedSpaces, "only called for DumpSharedSpaces");
+  assert(DumpSharedSpaces || DynamicDumpSharedSpaces, "only called during CDS dump time");
   if (log_is_enabled(Trace, cds, unshareable)) {
     ResourceMark rm;
     log_trace(cds, unshareable)("remove java_mirror: %s", external_name());
@@ -742,8 +735,9 @@ void Klass::print_on(outputStream* st) const {
   st->cr();
 }
 
+#define BULLET  " - "
+
 void Klass::oop_print_on(oop obj, outputStream* st) {
-  ResourceMark rm;
   // print title
   st->print_cr("%s ", internal_name());
   obj->print_address_on(st);
@@ -751,10 +745,13 @@ void Klass::oop_print_on(oop obj, outputStream* st) {
   if (WizardMode) {
      // print header
      obj->mark()->print_on(st);
+     st->cr();
+     st->print(BULLET"prototype_header: " INTPTR_FORMAT, p2i(_prototype_header));
+     st->cr();
   }
 
   // print class
-  st->print(" - klass: ");
+  st->print(BULLET"klass: ");
   obj->klass()->print_value_on(st);
   st->cr();
 }
@@ -770,7 +767,7 @@ void Klass::oop_print_value_on(oop obj, outputStream* st) {
 // Size Statistics
 void Klass::collect_statistics(KlassSizeStats *sz) const {
   sz->_klass_bytes = sz->count(this);
-  sz->_mirror_bytes = sz->count(java_mirror());
+  sz->_mirror_bytes = sz->count(java_mirror_no_keepalive());
   sz->_secondary_supers_bytes = sz->count_array(secondary_supers());
 
   sz->_ro_bytes += sz->_secondary_supers_bytes;
@@ -812,17 +809,12 @@ void Klass::oop_verify_on(oop obj, outputStream* st) {
   guarantee(obj->klass()->is_klass(), "klass field is not a klass");
 }
 
-Klass* Klass::decode_klass_raw(narrowKlass narrow_klass) {
-  return (Klass*)(void*)( (uintptr_t)Universe::narrow_klass_base() +
-                         ((uintptr_t)narrow_klass << Universe::narrow_klass_shift()));
-}
-
 bool Klass::is_valid(Klass* k) {
   if (!is_aligned(k, sizeof(MetaWord))) return false;
   if ((size_t)k < os::min_page_size()) return false;
 
   if (!os::is_readable_range(k, k + 1)) return false;
-  if (!MetaspaceUtils::is_range_in_committed(k, k + 1)) return false;
+  if (!Metaspace::contains(k)) return false;
 
   if (!Symbol::is_valid(k->name())) return false;
   return ClassLoaderDataGraph::is_valid(k->class_loader_data());

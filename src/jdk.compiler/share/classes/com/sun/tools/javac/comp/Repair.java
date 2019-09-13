@@ -38,7 +38,7 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.jvm.Pool;
+import com.sun.tools.javac.jvm.PoolWriter;
 import com.sun.tools.javac.parser.Tokens;
 import com.sun.tools.javac.resources.CompilerProperties;
 import com.sun.tools.javac.tree.JCTree;
@@ -138,7 +138,7 @@ public class Repair extends TreeTranslator {
     public <T extends JCTree> T translate(T tree) {
         if (tree == null)
             return null;
-        if (tree.type != null && tree.type.constValue() instanceof String && ((String)tree.type.constValue()).length() >= Pool.MAX_STRING_LENGTH) {
+        if (tree.type != null && tree.type.constValue() instanceof String && ((String)tree.type.constValue()).length() >= PoolWriter.MAX_STRING_LENGTH) {
             log.error(tree.pos(), CompilerProperties.Errors.LimitString); //NOI18N
         }
         parents = parents.prepend(tree);
@@ -241,10 +241,10 @@ public class Repair extends TreeTranslator {
         super.visitTypeParameter(tree);
         if (tree.type != null && tree.type.hasTag(TypeTag.TYPEVAR)) {
             Type.TypeVar tv = (Type.TypeVar)tree.type;
-            if (tv.bound != null && tv.bound.isErroneous() || tv.bound == syms.unknownType) {
+            if (tv.getUpperBound() != null && tv.getUpperBound().isErroneous() || tv.getUpperBound() == syms.unknownType) {
                 if (err == null && errMessage == null)
-                    errMessage = "Erroneous type var bound: " + tv.bound;
-                tv.bound = syms.objectType;
+                    errMessage = "Erroneous type var bound: " + tv.getUpperBound();
+                tv.setUpperBound(syms.objectType);
                 hasError = true;
             }
         }

@@ -487,6 +487,12 @@ public class JSR166TestCase extends TestCase {
     public static boolean atLeastJava9()  { return JAVA_CLASS_VERSION >= 53.0; }
     public static boolean atLeastJava10() { return JAVA_CLASS_VERSION >= 54.0; }
     public static boolean atLeastJava11() { return JAVA_CLASS_VERSION >= 55.0; }
+    public static boolean atLeastJava12() { return JAVA_CLASS_VERSION >= 56.0; }
+    public static boolean atLeastJava13() { return JAVA_CLASS_VERSION >= 57.0; }
+    public static boolean atLeastJava14() { return JAVA_CLASS_VERSION >= 58.0; }
+    public static boolean atLeastJava15() { return JAVA_CLASS_VERSION >= 59.0; }
+    public static boolean atLeastJava16() { return JAVA_CLASS_VERSION >= 60.0; }
+    public static boolean atLeastJava17() { return JAVA_CLASS_VERSION >= 61.0; }
 
     /**
      * Collects all JSR166 unit tests as one suite.
@@ -538,6 +544,7 @@ public class JSR166TestCase extends TestCase {
             ExecutorsTest.suite(),
             ExecutorCompletionServiceTest.suite(),
             FutureTaskTest.suite(),
+            HashtableTest.suite(),
             LinkedBlockingDequeTest.suite(),
             LinkedBlockingQueueTest.suite(),
             LinkedListTest.suite(),
@@ -577,6 +584,7 @@ public class JSR166TestCase extends TestCase {
                 "HashMapTest",
                 "LinkedBlockingDeque8Test",
                 "LinkedBlockingQueue8Test",
+                "LinkedHashMapTest",
                 "LongAccumulatorTest",
                 "LongAdderTest",
                 "SplittableRandomTest",
@@ -1770,12 +1778,11 @@ public class JSR166TestCase extends TestCase {
         }
     }
 
-    void assertImmutable(final Object o) {
+    void assertImmutable(Object o) {
         if (o instanceof Collection) {
             assertThrows(
                 UnsupportedOperationException.class,
-                new Runnable() { public void run() {
-                        ((Collection) o).add(null);}});
+                () -> ((Collection) o).add(null));
         }
     }
 
@@ -1835,8 +1842,8 @@ public class JSR166TestCase extends TestCase {
     }
 
     public void assertThrows(Class<? extends Throwable> expectedExceptionClass,
-                             Runnable... throwingActions) {
-        for (Runnable throwingAction : throwingActions) {
+                             Action... throwingActions) {
+        for (Action throwingAction : throwingActions) {
             boolean threw = false;
             try { throwingAction.run(); }
             catch (Throwable t) {

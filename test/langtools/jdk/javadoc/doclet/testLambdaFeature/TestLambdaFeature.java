@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,9 @@
  * @summary  Make sure that the lambda feature changes work fine in
  *           javadoc.
  * @author   bpatel
- * @library  ../lib/
+ * @library  ../../lib/
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
- * @build    JavadocTester TestLambdaFeature
+ * @build    javadoc.tester.* TestLambdaFeature
  * @run main TestLambdaFeature
  */
 
@@ -39,6 +39,8 @@
  *              removed [ 8022738 ]
  */
 
+import javadoc.tester.JavadocTester;
+
 public class TestLambdaFeature extends JavadocTester {
 
     public static void main(String... args) throws Exception {
@@ -47,7 +49,7 @@ public class TestLambdaFeature extends JavadocTester {
     }
 
     @Test
-    void testDefault() {
+    public void testDefault() {
         javadoc("-d", "out-default",
                 "-sourcepath", testSrc,
                 "pkg", "pkg1");
@@ -55,7 +57,8 @@ public class TestLambdaFeature extends JavadocTester {
 
         checkOutput("pkg/A.html", true,
                 "<td class=\"colFirst\"><code>default void</code></td>",
-                "<pre class=\"methodSignature\">default&nbsp;void&nbsp;defaultMethod()</pre>",
+                "<div class=\"memberSignature\"><span class=\"modifiers\">default</span>&nbsp;"
+                + "<span class=\"returnType\">void</span>&nbsp;<span class=\"memberName\">defaultMethod</span>()</div>\n",
                 "<div role=\"tablist\" aria-orientation=\"horizontal\"><button role=\"tab\""
                 + " aria-selected=\"true\" aria-controls=\"memberSummary_tabpanel\" tabindex=\"0\""
                 + " onkeydown=\"switchTab(event)\" id=\"t0\" class=\"activeTableTab\">All Methods"
@@ -101,7 +104,7 @@ public class TestLambdaFeature extends JavadocTester {
     }
 
     @Test
-    void testSource7() {
+    public void testSource7() {
         javadoc("-d", "out-7",
                 "-sourcepath", testSrc,
                 "-source", "1.7",

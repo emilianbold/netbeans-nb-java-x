@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_CODE_CODEBLOB_HPP
-#define SHARE_VM_CODE_CODEBLOB_HPP
+#ifndef SHARE_CODE_CODEBLOB_HPP
+#define SHARE_CODE_CODEBLOB_HPP
 
 #include "asm/codeBuffer.hpp"
 #include "compiler/compilerDefinitions.hpp"
@@ -211,7 +211,7 @@ public:
   const ImmutableOopMap* oop_map_for_return_address(address return_address);
   virtual void preserve_callee_argument_oops(frame fr, const RegisterMap* reg_map, OopClosure* f) = 0;
 
-  // Frame support
+  // Frame support. Sizes are in word units.
   int  frame_size() const                        { return _frame_size; }
   void set_frame_size(int size)                  { _frame_size = size; }
 
@@ -224,12 +224,16 @@ public:
 
   // Debugging
   virtual void verify() = 0;
-  virtual void print() const                     { print_on(tty); };
+  virtual void print() const;
   virtual void print_on(outputStream* st) const;
   virtual void print_value_on(outputStream* st) const;
   void dump_for_addr(address addr, outputStream* st, bool verbose) const;
   void print_code();
 
+  bool has_block_comment(address block_begin) const {
+    intptr_t offset = (intptr_t)(block_begin - code_begin());
+    return _strings.has_block_comment(offset);
+  }
   // Print the comment associated with offset on stream, if there is one
   virtual void print_block_comment(outputStream* stream, address block_begin) const {
     intptr_t offset = (intptr_t)(block_begin - code_begin());
@@ -374,7 +378,6 @@ class RuntimeBlob : public CodeBlob {
   virtual void preserve_callee_argument_oops(frame fr, const RegisterMap* reg_map, OopClosure* f)  { ShouldNotReachHere(); }
 
   // Debugging
-  void print() const                             { print_on(tty); }
   virtual void print_on(outputStream* st) const { CodeBlob::print_on(st); }
   virtual void print_value_on(outputStream* st) const { CodeBlob::print_value_on(st); }
 
@@ -732,4 +735,4 @@ class SafepointBlob: public SingletonBlob {
   bool is_safepoint_stub() const                 { return true; }
 };
 
-#endif // SHARE_VM_CODE_CODEBLOB_HPP
+#endif // SHARE_CODE_CODEBLOB_HPP

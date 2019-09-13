@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,10 @@
  * @test
  * @requires vm.cds
  * @modules java.base/jdk.internal.misc
+ *          jdk.jartool/sun.tools.jar
  * @library ../..
  * @library /test/lib
+ * @compile ../../test-classes/Hello.java
  * @run driver OverrideTests
  * @summary AppCDS tests for overriding archived classes with -p and --upgrade-module-path
  */
@@ -65,7 +67,7 @@ public class OverrideTests {
     private static final String TEST_SRC = System.getProperty("test.src");
     private static final Path SRC_DIR = Paths.get(TEST_SRC, "src");
     private static final Path MODS_DIR = Paths.get("mods");
-
+    private static String appJar;
     // the module that is upgraded
     private static final String[] UPGRADED_MODULES = {"jdk.compiler", "java.net.http"};
     private static final Path[] UPGRADEDMODS_DIR = {Paths.get("upgradedmod1"), Paths.get("upgradedmod2")};
@@ -82,6 +84,7 @@ public class OverrideTests {
 
 
     public static void main(String[] args) throws Exception {
+        appJar = JarBuilder.getOrCreateHelloJar();
         OverrideTests tests = new OverrideTests();
         tests.compileModulesAndDumpArchive();
         tests.testAppClassOverriding();
@@ -111,7 +114,7 @@ public class OverrideTests {
         Asserts.assertTrue(compiled, TEST_MODULE + " did not compile");
 
         // dump the archive with jdk.compiler and java.net.http classes in the class list
-        OutputAnalyzer output  = TestCommon.dump(null /* appJar*/, TestCommon.list(ARCHIVE_CLASSES));
+        OutputAnalyzer output  = TestCommon.dump(appJar, TestCommon.list(ARCHIVE_CLASSES));
         TestCommon.checkDump(output);
         // Make sure all the classes where successfully archived.
         for (String archiveClass : ARCHIVE_CLASSES) {
@@ -159,11 +162,10 @@ public class OverrideTests {
         boolean isAppLoader = loaderName.equals("app");
         int upgradeModIdx = isAppLoader ? 0 : 1;
         String expectedException = "java.lang.module.FindException: Unable to compute the hash";
-        String prefix[] = new String[4];
-        prefix[0] = "-cp";
-        prefix[1] = "\"\"";
-        prefix[2] = "--add-modules";
-        prefix[3] = "java.net.http";
+        String prefix[] = new String[3];
+        prefix[0] = "-Djava.class.path=" + appJar;
+        prefix[1] = "--add-modules";
+        prefix[2] = "java.net.http";
 
         // Run the test with --upgrade-module-path set to alternate location of archiveClass
         // The alternate version of archiveClass SHOULD be found.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -100,11 +100,14 @@ public final class AnnotatedTypeFactory {
             if (clz.getEnclosingClass() == null)
                 return addTo;
             if (Modifier.isStatic(clz.getModifiers()))
-                return nestingForType(clz.getEnclosingClass(), addTo);
+                return addTo;
             return nestingForType(clz.getEnclosingClass(), addTo.pushInner());
         } else if (type instanceof ParameterizedType) {
             ParameterizedType t = (ParameterizedType)type;
             if (t.getOwnerType() == null)
+                return addTo;
+            if (t.getRawType() instanceof Class
+                    && Modifier.isStatic(((Class) t.getRawType()).getModifiers()))
                 return addTo;
             return nestingForType(t.getOwnerType(), addTo.pushInner());
         }
@@ -193,14 +196,18 @@ public final class AnnotatedTypeFactory {
             if (!(type instanceof Class<?>))
                 throw new IllegalStateException("Can't compute owner");
 
-            Class<?> inner = (Class<?>)type;
-            Class<?> owner = inner.getDeclaringClass();
+            Class<?> nested = (Class<?>)type;
+            Class<?> owner = nested.getDeclaringClass();
             if (owner == null) // top-level, local or anonymous
                 return null;
-            if (inner.isPrimitive() || inner == Void.TYPE)
+            if (nested.isPrimitive() || nested == Void.TYPE)
                 return null;
 
-            LocationInfo outerLoc = nestingForType(owner, getLocation().popAllLocations((byte)1));
+            LocationInfo outerLoc = getLocation().popLocation((byte)1);
+            if (outerLoc == null) {
+              return buildAnnotatedType(owner, LocationInfo.BASE_LOCATION,
+                      EMPTY_TYPE_ANNOTATION_ARRAY, EMPTY_TYPE_ANNOTATION_ARRAY, getDecl());
+            }
             TypeAnnotation[]all = getTypeAnnotations();
             List<TypeAnnotation> l = new ArrayList<>(all.length);
 
@@ -386,28 +393,21 @@ public final class AnnotatedTypeFactory {
             return (TypeVariable)getType();
         }
 
-        // For toString, the declaration of a type variable should
-        // including information about its bounds, etc. However, the
+        // The declaration of a type variable should
+        // include information about its bounds, etc. However, the
         // use of a type variable should not. For that reason, it is
-        // acceptable for the toString implementation of
+        // acceptable for the toString and hashCode implementations of
         // AnnotatedTypeVariableImpl to use the inherited
-        // implementation from AnnotatedTypeBaseImpl.
+        // implementations from AnnotatedTypeBaseImpl.
 
         @Override
         public boolean equals(Object o) {
             if (o instanceof AnnotatedTypeVariable) {
                 AnnotatedTypeVariable that = (AnnotatedTypeVariable) o;
-                return equalsTypeAndAnnotations(that) &&
-                    Arrays.equals(getAnnotatedBounds(), that.getAnnotatedBounds());
+                return equalsTypeAndAnnotations(that);
             } else {
                 return false;
             }
-        }
-
-        @Override
-        public int hashCode() {
-            return baseHashCode() ^
-                Objects.hash((Object[])getAnnotatedBounds());
         }
     }
 
@@ -445,7 +445,12 @@ public final class AnnotatedTypeFactory {
             Type owner = getParameterizedType().getOwnerType();
             if (owner == null)
                 return null;
-            LocationInfo outerLoc = nestingForType(owner, getLocation().popAllLocations((byte)1));
+
+            LocationInfo outerLoc = getLocation().popLocation((byte)1);
+            if (outerLoc == null) {
+              return buildAnnotatedType(owner, LocationInfo.BASE_LOCATION,
+                      EMPTY_TYPE_ANNOTATION_ARRAY, EMPTY_TYPE_ANNOTATION_ARRAY, getDecl());
+            }
             TypeAnnotation[]all = getTypeAnnotations();
             List<TypeAnnotation> l = new ArrayList<>(all.length);
 

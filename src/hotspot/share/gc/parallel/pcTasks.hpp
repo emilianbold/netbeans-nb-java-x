@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,13 @@
  *
  */
 
-#ifndef SHARE_VM_GC_PARALLEL_PCTASKS_HPP
-#define SHARE_VM_GC_PARALLEL_PCTASKS_HPP
+#ifndef SHARE_GC_PARALLEL_PCTASKS_HPP
+#define SHARE_GC_PARALLEL_PCTASKS_HPP
 
 #include "gc/parallel/gcTaskManager.hpp"
 #include "gc/parallel/psParallelCompact.hpp"
 #include "gc/parallel/psTasks.hpp"
+#include "gc/shared/referenceProcessor.hpp"
 
 
 // Tasks for parallel compaction of the old generation
@@ -98,6 +99,7 @@ class MarkFromRootsTask : public GCTask {
     system_dictionary     = 7,
     class_loader_data     = 8,
     code_cache            = 9
+    JVMCI_ONLY(COMMA jvmci = 10)
   };
  private:
   RootType _root_type;
@@ -205,4 +207,4 @@ class UpdateDensePrefixTask : public GCTask {
 
   virtual void do_it(GCTaskManager* manager, uint which);
 };
-#endif // SHARE_VM_GC_PARALLEL_PCTASKS_HPP
+#endif // SHARE_GC_PARALLEL_PCTASKS_HPP

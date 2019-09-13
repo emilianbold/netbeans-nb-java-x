@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -319,6 +319,12 @@ public class Flags {
      */
     public static final long BODY_ONLY_FINALIZE = 1L<<17; //blocks only
 
+    /**
+     * Flag to indicate the given ParamSymbol has a user-friendly name filled.
+     */
+    public static final long NAME_FILLED = 1L<<58; //ParamSymbols only
+    
+    
     public static final long FROMCLASS = 1L<<61;
     public static final long APT_CLEANED = 1L<<62;
 
@@ -438,7 +444,8 @@ public class Flags {
         DEPRECATED_REMOVAL(Flags.DEPRECATED_REMOVAL),
         HAS_RESOURCE(Flags.HAS_RESOURCE),
         POTENTIALLY_AMBIGUOUS(Flags.POTENTIALLY_AMBIGUOUS),
-        ANONCONSTR_BASED(Flags.ANONCONSTR_BASED);
+        ANONCONSTR_BASED(Flags.ANONCONSTR_BASED),
+        NAME_FILLED(Flags.NAME_FILLED);
 
         Flag(long flag) {
             this.value = flag;

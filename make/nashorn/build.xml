@@ -264,6 +264,7 @@
     <property name="compile.suppress.jar" value="defined"/>
   </target>
 
+<!--
   <!-- generate javadoc for Nashorn classes -->
   <target name="javadoc" depends="jar" unless="test.class">
     <javadoc destdir="${dist.javadoc.dir}" use="yes"
@@ -281,7 +282,7 @@
       <link offline="true" href="${javadoc.base.url}" packagelistLoc="${javadoc.element.list}"/>
     </javadoc>
   </target>
-
+-->
   <!-- generate javadoc only for nashorn extension api classes -->
   <target name="nashornapi" depends="jar">
     <mkdir dir="${dist.nashornapi.javadoc.dir}"/>

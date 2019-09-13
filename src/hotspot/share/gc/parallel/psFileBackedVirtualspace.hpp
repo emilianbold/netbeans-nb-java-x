@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP
-#define SHARE_VM_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP
+#ifndef SHARE_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP
+#define SHARE_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP
 
 #include "gc/parallel/psVirtualspace.hpp"
 
@@ -34,7 +34,6 @@ private:
   bool _mapping_succeeded;
 public:
   PSFileBackedVirtualSpace(ReservedSpace rs, size_t alignment, const char* file_path);
-  PSFileBackedVirtualSpace(ReservedSpace rs, const char* file_path);
 
   bool   initialize();
   bool   expand_by(size_t bytes);
@@ -42,5 +41,4 @@ public:
   size_t expand_into(PSVirtualSpace* space, size_t bytes);
   void   release();
 };
-#endif // SHARE_VM_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP
-
+#endif // SHARE_GC_PARALLEL_PSFILEBACKEDVIRTUALSPACE_HPP

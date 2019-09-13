@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
  * @test
  * @bug 8202462
  * @summary {@index} may cause duplicate labels
- * @library /tools/lib ../lib
+ * @library /tools/lib ../../lib
  * @modules jdk.javadoc/jdk.javadoc.internal.tool
- * @build JavadocTester toolbox.ToolBox builder.ClassBuilder
+ * @build javadoc.tester.* toolbox.ToolBox builder.ClassBuilder
  * @run main TestIndexTaglet
  */
 
@@ -39,13 +39,15 @@ import builder.ClassBuilder;
 import builder.ClassBuilder.MethodBuilder;
 import toolbox.ToolBox;
 
+import javadoc.tester.JavadocTester;
+
 public class TestIndexTaglet extends JavadocTester {
 
     final ToolBox tb;
 
     public static void main(String... args) throws Exception {
         TestIndexTaglet tester = new TestIndexTaglet();
-        tester.runTests(m -> new Object[]{Paths.get(m.getName())});
+        tester.runTests(m -> new Object[] { Paths.get(m.getName()) });
     }
 
     TestIndexTaglet() {
@@ -53,7 +55,7 @@ public class TestIndexTaglet extends JavadocTester {
     }
 
     @Test
-    void test(Path base) throws Exception {
+    public void test(Path base) throws Exception {
         Path srcDir = base.resolve("src");
         Path outDir = base.resolve("out");
 
@@ -73,17 +75,17 @@ public class TestIndexTaglet extends JavadocTester {
         checkExit(Exit.OK);
 
         checkOrder("pkg/A.html",
-                "<h3>Method Detail</h3>\n",
+                "<h2>Method Details</h2>\n",
                 "<div class=\"block\">test description with <a id=\"search_phrase_a\" "
                  +    "class=\"searchTagResult\">search_phrase_a</a></div>");
 
         checkOrder("pkg/A.html",
-                "<h3>Method Summary</h3>\n",
+                "<h2>Method Summary</h2>\n",
                 "<div class=\"block\">test description with search_phrase_a</div>");
     }
 
     @Test
-    void testIndexWithinATag(Path base) throws Exception {
+    public void testIndexWithinATag(Path base) throws Exception {
         Path srcDir = base.resolve("src");
         Path outDir = base.resolve("out");
 
@@ -101,5 +103,28 @@ public class TestIndexTaglet extends JavadocTester {
 
         checkOutput(Output.OUT, true,
                 "warning: {@index} tag, which expands to <a>, within <a>");
+    }
+
+    @Test
+    public void testDuplicateReferences(Path base) throws Exception {
+        Path srcDir = base.resolve("src");
+        Path outDir = base.resolve("out");
+
+        new ClassBuilder(tb, "pkg.A")
+                .setModifiers("public", "class")
+                .setComments("This is a class. Here is {@index foo first}.")
+                .addMembers(MethodBuilder.parse("public void m() {}")
+                        .setComments("This is a method. Here is {@index foo second}."))
+                .write(srcDir);
+
+        javadoc("-d", outDir.toString(),
+                "-sourcepath", srcDir.toString(),
+                "pkg");
+
+        checkExit(Exit.OK);
+
+        checkOutput("pkg/A.html", true,
+                "This is a class. Here is <a id=\"foo\" class=\"searchTagResult\">foo</a>.",
+                "This is a method. Here is <a id=\"foo-1\" class=\"searchTagResult\">foo</a>.");
     }
 }

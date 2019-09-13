@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_SERVICES_ATTACHLISTENER_HPP
-#define SHARE_VM_SERVICES_ATTACHLISTENER_HPP
+#ifndef SHARE_SERVICES_ATTACHLISTENER_HPP
+#define SHARE_SERVICES_ATTACHLISTENER_HPP
 
 #include "memory/allocation.hpp"
 #include "utilities/debug.hpp"
@@ -121,7 +121,7 @@ class AttachOperation: public CHeapObj<mtInternal> {
   const char* name() const                      { return _name; }
 
   // set the operation name
-  void set_name(char* name) {
+  void set_name(const char* name) {
     assert(strlen(name) <= name_length_max, "exceeds maximum name length");
     size_t len = MIN2(strlen(name), (size_t)name_length_max);
     memcpy(_name, name, len);
@@ -148,7 +148,7 @@ class AttachOperation: public CHeapObj<mtInternal> {
   }
 
   // create an operation of a given name
-  AttachOperation(char* name) {
+  AttachOperation(const char* name) {
     set_name(name);
     for (int i=0; i<arg_count_max; i++) {
       set_arg(i, NULL);
@@ -160,4 +160,4 @@ class AttachOperation: public CHeapObj<mtInternal> {
 };
 #endif // INCLUDE_SERVICES
 
-#endif // SHARE_VM_SERVICES_ATTACHLISTENER_HPP
+#endif // SHARE_SERVICES_ATTACHLISTENER_HPP

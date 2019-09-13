@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -116,7 +116,7 @@ Klass* ObjArrayKlass::allocate_objArray_klass(ClassLoaderData* loader_data,
       new_str[idx++] = ';';
     }
     new_str[idx++] = '\0';
-    name = SymbolTable::new_permanent_symbol(new_str, CHECK_0);
+    name = SymbolTable::new_permanent_symbol(new_str);
     if (element_klass->is_instance_klass()) {
       InstanceKlass* ik = InstanceKlass::cast(element_klass);
       ik->set_array_name(name);
@@ -126,16 +126,18 @@ Klass* ObjArrayKlass::allocate_objArray_klass(ClassLoaderData* loader_data,
   // Initialize instance variables
   ObjArrayKlass* oak = ObjArrayKlass::allocate(loader_data, n, element_klass, name, CHECK_0);
 
-  // Add all classes to our internal class loader list here,
-  // including classes in the bootstrap (NULL) class loader.
-  // GC walks these as strong roots.
-  loader_data->add_class(oak);
-
   ModuleEntry* module = oak->module();
   assert(module != NULL, "No module entry for array");
 
   // Call complete_create_array_klass after all instance variables has been initialized.
   ArrayKlass::complete_create_array_klass(oak, super_klass, module, CHECK_0);
+
+  // Add all classes to our internal class loader list here,
+  // including classes in the bootstrap (NULL) class loader.
+  // Do this step after creating the mirror so that if the
+  // mirror creation fails, loaded_classes_do() doesn't find
+  // an array class without a mirror.
+  loader_data->add_class(oak);
 
   return oak;
 }
@@ -393,14 +395,6 @@ GrowableArray<Klass*>* ObjArrayKlass::compute_secondary_supers(int num_extra_slo
     }
     return secondaries;
   }
-}
-
-bool ObjArrayKlass::compute_is_subtype_of(Klass* k) {
-  if (!k->is_objArray_klass())
-    return ArrayKlass::compute_is_subtype_of(k);
-
-  ObjArrayKlass* oak = ObjArrayKlass::cast(k);
-  return element_klass()->is_subtype_of(oak->element_klass());
 }
 
 void ObjArrayKlass::initialize(TRAPS) {

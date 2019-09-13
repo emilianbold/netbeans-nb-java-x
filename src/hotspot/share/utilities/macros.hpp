@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_UTILITIES_MACROS_HPP
-#define SHARE_VM_UTILITIES_MACROS_HPP
+#ifndef SHARE_UTILITIES_MACROS_HPP
+#define SHARE_UTILITIES_MACROS_HPP
 
 // Use this to mark code that needs to be cleaned up (for development only)
 #define NEEDS_CLEANUP
@@ -279,8 +279,10 @@
 
 #if INCLUDE_JFR
 #define JFR_ONLY(code) code
+#define NOT_JFR_RETURN_(code) /* next token must be ; */
 #else
 #define JFR_ONLY(code)
+#define NOT_JFR_RETURN_(code) { return code; }
 #endif
 
 #ifndef INCLUDE_JVMCI
@@ -640,4 +642,4 @@
 #define NOT_CDS_JAVA_HEAP_RETURN_(code) { return code; }
 #endif
 
-#endif // SHARE_VM_UTILITIES_MACROS_HPP
+#endif // SHARE_UTILITIES_MACROS_HPP

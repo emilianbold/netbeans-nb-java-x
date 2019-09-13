@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_G1_SPARSEPRT_HPP
-#define SHARE_VM_GC_G1_SPARSEPRT_HPP
+#ifndef SHARE_GC_G1_SPARSEPRT_HPP
+#define SHARE_GC_G1_SPARSEPRT_HPP
 
 #include "gc/g1/g1CollectedHeap.hpp"
 #include "gc/g1/heapRegion.hpp"
@@ -218,9 +218,7 @@ class SparsePRT {
 
   RSHashTable* _table;
 
-  enum SomeAdditionalPrivateConstants {
-    InitialCapacity = 16
-  };
+  static const size_t InitialCapacity = 8;
 
   void expand();
 
@@ -264,4 +262,4 @@ public:
   }
 };
 
-#endif // SHARE_VM_GC_G1_SPARSEPRT_HPP
+#endif // SHARE_GC_G1_SPARSEPRT_HPP

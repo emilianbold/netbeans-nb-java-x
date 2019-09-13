@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2018 SAP SE. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,7 @@
 #include "compiler/compileBroker.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "libo4.hpp"
 #include "libperfstat_aix.hpp"
 #include "libodm_aix.hpp"
@@ -923,6 +924,11 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
     char buf[64];
     log_warning(os, thread)("Failed to start thread - pthread_create failed (%d=%s) for attributes: %s.",
       ret, os::errno_name(ret), os::Posix::describe_pthread_attr(buf, sizeof(buf), &attr));
+    // Log some OS information which might explain why creating the thread failed.
+    log_info(os, thread)("Number of threads approx. running in the VM: %d", Threads::number_of_threads());
+    LogStream st(Log(os, thread)::info());
+    os::Posix::print_rlimit_info(&st);
+    os::print_memory_info(&st);
   }
 
   pthread_attr_destroy(&attr);
@@ -1200,8 +1206,15 @@ void os::abort(bool dump_core, void* siginfo, const void* context) {
 }
 
 // Die immediately, no exit hook, no abort hook, no cleanup.
+// Dump a core file, if possible, for debugging.
 void os::die() {
-  ::abort();
+  if (TestUnresponsiveErrorHandler && !CreateCoredumpOnCrash) {
+    // For TimeoutInErrorHandlingTest.java, we just kill the VM
+    // and don't take the time to generate a core file.
+    os::signal_raise(SIGKILL);
+  } else {
+    ::abort();
+  }
 }
 
 intx os::current_thread_id() {
@@ -1314,16 +1327,21 @@ void *os::dll_load(const char *filename, char *ebuf, int ebuflen) {
   // RTLD_LAZY is currently not implemented. The dl is loaded immediately with all its dependants.
   void * result= ::dlopen(filename, RTLD_LAZY);
   if (result != NULL) {
+    Events::log(NULL, "Loaded shared library %s", filename);
     // Reload dll cache. Don't do this in signal handling.
     LoadedLibraries::reload();
     return result;
   } else {
     // error analysis when dlopen fails
-    const char* const error_report = ::dlerror();
-    if (error_report && ebuf && ebuflen > 0) {
+    const char* error_report = ::dlerror();
+    if (error_report == NULL) {
+      error_report = "dlerror returned no error description";
+    }
+    if (ebuf != NULL && ebuflen > 0) {
       snprintf(ebuf, ebuflen - 1, "%s, LIBPATH=%s, LD_LIBRARY_PATH=%s : %s",
                filename, ::getenv("LIBPATH"), ::getenv("LD_LIBRARY_PATH"), error_report);
     }
+    Events::log(NULL, "Loading shared library %s failed, %s", filename, error_report);
   }
   return NULL;
 }
@@ -1383,12 +1401,15 @@ void os::print_os_info(outputStream* st) {
 
   os::Posix::print_rlimit_info(st);
 
+  // _SC_THREAD_THREADS_MAX is the maximum number of threads within a process.
+  long tmax = sysconf(_SC_THREAD_THREADS_MAX);
+  st->print_cr("maximum #threads within a process:%ld", tmax);
+
   // load average
   st->print("load average:");
   double loadavg[3] = {-1.L, -1.L, -1.L};
   os::loadavg(loadavg, 3);
-  st->print("%0.02f %0.02f %0.02f", loadavg[0], loadavg[1], loadavg[2]);
-  st->cr();
+  st->print_cr("%0.02f %0.02f %0.02f", loadavg[0], loadavg[1], loadavg[2]);
 
   // print wpar info
   libperfstat::wparinfo_t wi;
@@ -1399,13 +1420,7 @@ void os::print_os_info(outputStream* st) {
     st->print_cr("type: %s", (wi.app_wpar ? "application" : "system"));
   }
 
-  // print partition info
-  libperfstat::partitioninfo_t pi;
-  if (libperfstat::get_partitioninfo(&pi)) {
-    st->print_cr("partition info");
-    st->print_cr(" name: %s", pi.name);
-  }
-
+  VM_Version::print_platform_virtualization_info(st);
 }
 
 void os::print_memory_info(outputStream* st) {
@@ -2439,6 +2454,7 @@ static bool checked_mprotect(char* addr, size_t size, int prot) {
   //
   // See http://publib.boulder.ibm.com/infocenter/pseries/v5r3/index.jsp?topic=/com.ibm.aix.basetechref/doc/basetrf1/mprotect.htm
 
+  Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+size), prot);
   bool rc = ::mprotect(addr, size, prot) == 0 ? true : false;
 
   if (!rc) {
@@ -2479,6 +2495,7 @@ static bool checked_mprotect(char* addr, size_t size, int prot) {
           // A valid strategy is just to try again. This usually works. :-/
 
           ::usleep(1000);
+          Events::log(NULL, "Protecting memory [" INTPTR_FORMAT "," INTPTR_FORMAT "] with protection modes %x", p2i(addr), p2i(addr+size), prot);
           if (::mprotect(addr, size, prot) == 0) {
             const bool read_protected_2 =
               (SafeFetch32((int*)addr, 0x12345678) == 0x12345678 &&
@@ -2592,31 +2609,6 @@ char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
   }
 
   return addr;
-}
-
-size_t os::read(int fd, void *buf, unsigned int nBytes) {
-  return ::read(fd, buf, nBytes);
-}
-
-size_t os::read_at(int fd, void *buf, unsigned int nBytes, jlong offset) {
-  return ::pread(fd, buf, nBytes, offset);
-}
-
-void os::naked_short_sleep(jlong ms) {
-  struct timespec req;
-
-  assert(ms < 1000, "Un-interruptable sleep, short time use only");
-  req.tv_sec = 0;
-  if (ms > 0) {
-    req.tv_nsec = (ms % 1000) * 1000000;
-  }
-  else {
-    req.tv_nsec = 1;
-  }
-
-  nanosleep(&req, NULL);
-
-  return;
 }
 
 // Sleep forever; naked call to OS-specific sleep; use with CAUTION
@@ -3021,8 +3013,6 @@ static void javaSignalHandler(int sig, siginfo_t* info, void* uc) {
 bool os::Aix::signal_handlers_are_installed = false;
 
 // For signal-chaining
-struct sigaction sigact[NSIG];
-sigset_t sigs;
 bool os::Aix::libjsig_is_loaded = false;
 typedef struct sigaction *(*get_signal_t)(int);
 get_signal_t os::Aix::get_signal_action = NULL;
@@ -3036,7 +3026,7 @@ struct sigaction* os::Aix::get_chained_signal_action(int sig) {
   }
   if (actp == NULL) {
     // Retrieve the preinstalled signal handler from jvm
-    actp = get_preinstalled_handler(sig);
+    actp = os::Posix::get_preinstalled_handler(sig);
   }
 
   return actp;
@@ -3099,19 +3089,6 @@ bool os::Aix::chained_handler(int sig, siginfo_t* siginfo, void* context) {
   return chained;
 }
 
-struct sigaction* os::Aix::get_preinstalled_handler(int sig) {
-  if (sigismember(&sigs, sig)) {
-    return &sigact[sig];
-  }
-  return NULL;
-}
-
-void os::Aix::save_preinstalled_handler(int sig, struct sigaction& oldAct) {
-  assert(sig > 0 && sig < NSIG, "vm signal out of expected range");
-  sigact[sig] = oldAct;
-  sigaddset(&sigs, sig);
-}
-
 // for diagnostic
 int sigflags[NSIG];
 
@@ -3143,7 +3120,7 @@ void os::Aix::set_signal_handler(int sig, bool set_installed) {
       return;
     } else if (UseSignalChaining) {
       // save the old handler in jvm
-      save_preinstalled_handler(sig, oldAct);
+      os::Posix::save_preinstalled_handler(sig, oldAct);
       // libjsig also interposes the sigaction() call below and saves the
       // old sigaction on it own.
     } else {
@@ -3199,7 +3176,6 @@ void os::Aix::install_signal_handlers() {
       (*begin_signal_setting)();
     }
 
-    ::sigemptyset(&sigs);
     set_signal_handler(SIGSEGV, true);
     set_signal_handler(SIGPIPE, true);
     set_signal_handler(SIGBUS, true);
@@ -3485,7 +3461,7 @@ void os::init(void) {
       // fall back to 4K paged mode and use mmap for everything.
       trcVerbose("4K page mode");
       Aix::_page_size = 4*K;
-      FLAG_SET_ERGO(bool, Use64KPages, false);
+      FLAG_SET_ERGO(Use64KPages, false);
     }
   } else {
     // datapsize = 64k. Data segment, thread stacks are 64k paged.
@@ -3495,11 +3471,11 @@ void os::init(void) {
     assert0(g_multipage_support.can_use_64K_pages);
     Aix::_page_size = 64*K;
     trcVerbose("64K page mode");
-    FLAG_SET_ERGO(bool, Use64KPages, true);
+    FLAG_SET_ERGO(Use64KPages, true);
   }
 
   // For now UseLargePages is just ignored.
-  FLAG_SET_ERGO(bool, UseLargePages, false);
+  FLAG_SET_ERGO(UseLargePages, false);
   _page_sizes[0] = 0;
 
   // debug trace

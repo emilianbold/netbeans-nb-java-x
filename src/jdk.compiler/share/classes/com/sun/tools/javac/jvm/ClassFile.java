@@ -25,9 +25,6 @@
 
 package com.sun.tools.javac.jvm;
 
-import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.code.Types.UniqueType;
 import com.sun.tools.javac.util.Name;
 
 
@@ -116,7 +113,8 @@ public class ClassFile {
         V53(53, 0),   // JDK 1.9: modules, indy string concat
         V54(54, 0),   // JDK 10
         V55(55, 0),   // JDK 11: constant dynamic, nest mates
-        V56(56, 0);   // JDK 12
+        V56(56, 0),   // JDK 12
+        V57(57, 0);   // JDK 13
         Version(int major, int minor) {
             this.major = major;
             this.minor = minor;
@@ -187,39 +185,5 @@ public class ClassFile {
      */
     public static byte[] externalize(Name name) {
         return externalize(name.getByteArray(), name.getByteOffset(), name.getByteLength());
-    }
-
-/************************************************************************
- * Name-and-type
- ***********************************************************************/
-
-    /** A class for the name-and-type signature of a method or field.
-     */
-    public static class NameAndType {
-        Name name;
-        UniqueType uniqueType;
-        Types types;
-
-        NameAndType(Name name, Type type, Types types) {
-            this.name = name;
-            this.uniqueType = new UniqueType(type, types);
-            this.types = types;
-        }
-
-        void setType(Type type) {
-            this.uniqueType = new UniqueType(type, types);
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return (other instanceof NameAndType &&
-                    name == ((NameAndType) other).name &&
-                        uniqueType.equals(((NameAndType) other).uniqueType));
-        }
-
-        @Override
-        public int hashCode() {
-            return name.hashCode() * uniqueType.hashCode();
-        }
     }
 }

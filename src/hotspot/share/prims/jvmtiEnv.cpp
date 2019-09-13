@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,7 @@
 #include "runtime/arguments.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
+#include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaCalls.hpp"
 #include "runtime/jfieldIDWorkaround.hpp"
@@ -73,6 +74,7 @@
 #include "services/threadService.hpp"
 #include "utilities/exceptions.hpp"
 #include "utilities/preserveException.hpp"
+#include "utilities/utf8.hpp"
 
 
 #define FIXLATER 0 // REMOVE this when completed.
@@ -941,7 +943,7 @@ JvmtiEnv::SuspendThread(JavaThread* java_thread) {
   }
 
   {
-    MutexLockerEx ml(java_thread->SR_lock(), Mutex::_no_safepoint_check_flag);
+    MutexLocker ml(java_thread->SR_lock(), Mutex::_no_safepoint_check_flag);
     if (java_thread->is_external_suspend()) {
       // don't allow nested external suspend requests.
       return (JVMTI_ERROR_THREAD_SUSPENDED);
@@ -981,7 +983,7 @@ JvmtiEnv::SuspendThreadList(jint request_count, const jthread* request_list, jvm
     }
 
     {
-      MutexLockerEx ml(java_thread->SR_lock(), Mutex::_no_safepoint_check_flag);
+      MutexLocker ml(java_thread->SR_lock(), Mutex::_no_safepoint_check_flag);
       if (java_thread->is_external_suspend()) {
         // don't allow nested external suspend requests.
         results[i] = JVMTI_ERROR_THREAD_SUSPENDED;

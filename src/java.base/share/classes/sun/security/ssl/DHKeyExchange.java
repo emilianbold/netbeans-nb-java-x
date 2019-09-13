@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,19 +36,12 @@ import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
-import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
-import javax.crypto.KeyAgreement;
-import javax.crypto.SecretKey;
 import javax.crypto.interfaces.DHPublicKey;
 import javax.crypto.spec.DHParameterSpec;
 import javax.crypto.spec.DHPublicKeySpec;
-import javax.crypto.spec.SecretKeySpec;
-import javax.net.ssl.SSLHandshakeException;
 import sun.security.action.GetPropertyAction;
-import sun.security.ssl.CipherSuite.HashAlg;
-import sun.security.ssl.SupportedGroupsExtension.NamedGroup;
-import sun.security.ssl.SupportedGroupsExtension.NamedGroupType;
+import sun.security.ssl.NamedGroup.NamedGroupType;
 import sun.security.ssl.SupportedGroupsExtension.SupportedGroups;
 import sun.security.ssl.X509Authentication.X509Possession;
 import sun.security.util.KeyUtil;
@@ -61,13 +54,23 @@ final class DHKeyExchange {
     static final SSLKeyAgreementGenerator kaGenerator =
             new DHEKAGenerator();
 
-    static final class DHECredentials implements SSLCredentials {
+    static final class DHECredentials implements NamedGroupCredentials {
         final DHPublicKey popPublicKey;
         final NamedGroup namedGroup;
 
         DHECredentials(DHPublicKey popPublicKey, NamedGroup namedGroup) {
             this.popPublicKey = popPublicKey;
             this.namedGroup = namedGroup;
+        }
+
+        @Override
+        public PublicKey getPublicKey() {
+            return popPublicKey;
+        }
+
+        @Override
+        public NamedGroup getNamedGroup() {
+            return namedGroup;
         }
 
         static DHECredentials valueOf(NamedGroup ng,
@@ -87,7 +90,7 @@ final class DHKeyExchange {
                 return null;
             }
 
-            KeyFactory kf = JsseJce.getKeyFactory("DiffieHellman");
+            KeyFactory kf = KeyFactory.getInstance("DiffieHellman");
             DHPublicKeySpec spec = new DHPublicKeySpec(
                     new BigInteger(1, encodedPublic),
                     params.getP(), params.getG());
@@ -98,7 +101,7 @@ final class DHKeyExchange {
         }
     }
 
-    static final class DHEPossession implements SSLPossession {
+    static final class DHEPossession implements NamedGroupPossession {
         final PrivateKey privateKey;
         final DHPublicKey publicKey;
         final NamedGroup namedGroup;
@@ -106,7 +109,7 @@ final class DHKeyExchange {
         DHEPossession(NamedGroup namedGroup, SecureRandom random) {
             try {
                 KeyPairGenerator kpg =
-                        JsseJce.getKeyPairGenerator("DiffieHellman");
+                        KeyPairGenerator.getInstance("DiffieHellman");
                 DHParameterSpec params =
                         (DHParameterSpec)namedGroup.getParameterSpec();
                 kpg.initialize(params, random);
@@ -129,7 +132,7 @@ final class DHKeyExchange {
                     PredefinedDHParameterSpecs.definedParams.get(keyLength);
             try {
                 KeyPairGenerator kpg =
-                    JsseJce.getKeyPairGenerator("DiffieHellman");
+                    KeyPairGenerator.getInstance("DiffieHellman");
                 if (params != null) {
                     kpg.initialize(params, random);
                 } else {
@@ -155,7 +158,7 @@ final class DHKeyExchange {
         DHEPossession(DHECredentials credentials, SecureRandom random) {
             try {
                 KeyPairGenerator kpg =
-                        JsseJce.getKeyPairGenerator("DiffieHellman");
+                        KeyPairGenerator.getInstance("DiffieHellman");
                 kpg.initialize(credentials.popPublicKey.getParams(), random);
                 KeyPair kp = generateDHKeyPair(kpg);
                 if (kp == null) {
@@ -174,13 +177,13 @@ final class DHKeyExchange {
         // Generate and validate DHPublicKeySpec
         private KeyPair generateDHKeyPair(
                 KeyPairGenerator kpg) throws GeneralSecurityException {
-            boolean doExtraValiadtion =
+            boolean doExtraValidation =
                     (!KeyUtil.isOracleJCEProvider(kpg.getProvider().getName()));
             boolean isRecovering = false;
             for (int i = 0; i <= 2; i++) {      // Try to recover from failure.
                 KeyPair kp = kpg.generateKeyPair();
                 // validate the Diffie-Hellman public key
-                if (doExtraValiadtion) {
+                if (doExtraValidation) {
                     DHPublicKeySpec spec = getDHPublicKeySpec(kp.getPublic());
                     try {
                         KeyUtil.validate(spec);
@@ -208,7 +211,7 @@ final class DHKeyExchange {
                                         params.getP(), params.getG());
             }
             try {
-                KeyFactory factory = JsseJce.getKeyFactory("DiffieHellman");
+                KeyFactory factory = KeyFactory.getInstance("DiffieHellman");
                 return factory.getKeySpec(key, DHPublicKeySpec.class);
             } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
                 // unlikely
@@ -220,8 +223,8 @@ final class DHKeyExchange {
         public byte[] encode() {
             // Note: the DH public value is encoded as a big-endian integer
             // and padded to the left with zeros to the size of p in bytes.
-            byte[] encoded = publicKey.getY().toByteArray();
-            int pSize = KeyUtil.getKeySize(publicKey);
+            byte[] encoded = Utilities.toByteArray(publicKey.getY());
+            int pSize = (KeyUtil.getKeySize(publicKey) + 7) >>> 3;
             if (pSize > 0 && encoded.length < pSize) {
                 byte[] buffer = new byte[pSize];
                 System.arraycopy(encoded, 0,
@@ -230,6 +233,21 @@ final class DHKeyExchange {
             }
 
             return encoded;
+        }
+
+        @Override
+        public PublicKey getPublicKey() {
+            return publicKey;
+        }
+
+        @Override
+        public NamedGroup getNamedGroup() {
+            return namedGroup;
+        }
+
+        @Override
+        public PrivateKey getPrivateKey() {
+            return privateKey;
         }
     }
 
@@ -298,7 +316,7 @@ final class DHKeyExchange {
         // Used for ServerKeyExchange, TLS 1.2 and prior versions.
         @Override
         public SSLPossession createPossession(HandshakeContext context) {
-            NamedGroup preferableNamedGroup = null;
+            NamedGroup preferableNamedGroup;
             if (!useLegacyEphemeralDHKeys &&
                     (context.clientRequestedNamedGroups != null) &&
                     (!context.clientRequestedNamedGroups.isEmpty())) {
@@ -306,7 +324,8 @@ final class DHKeyExchange {
                         SupportedGroups.getPreferredGroup(
                                 context.negotiatedProtocol,
                                 context.algorithmConstraints,
-                                NamedGroupType.NAMED_GROUP_FFDHE,
+                                new NamedGroupType [] {
+                                    NamedGroupType.NAMED_GROUP_FFDHE },
                                 context.clientRequestedNamedGroups);
                 if (preferableNamedGroup != null) {
                     return new DHEPossession(preferableNamedGroup,
@@ -392,7 +411,7 @@ final class DHKeyExchange {
 
     private static final
             class DHEKAGenerator implements SSLKeyAgreementGenerator {
-        static private DHEKAGenerator instance = new DHEKAGenerator();
+        private static final DHEKAGenerator instance = new DHEKAGenerator();
 
         // Prevent instantiation of this class.
         private DHEKAGenerator() {
@@ -442,93 +461,8 @@ final class DHKeyExchange {
                     "No sufficient DHE key agreement parameters negotiated");
             }
 
-            return new DHEKAKeyDerivation(context,
+            return new KAKeyDerivation("DiffieHellman", context,
                     dhePossession.privateKey, dheCredentials.popPublicKey);
-        }
-
-        private static final
-                class DHEKAKeyDerivation implements SSLKeyDerivation {
-            private final HandshakeContext context;
-            private final PrivateKey localPrivateKey;
-            private final PublicKey peerPublicKey;
-
-            DHEKAKeyDerivation(HandshakeContext context,
-                    PrivateKey localPrivateKey,
-                    PublicKey peerPublicKey) {
-                this.context = context;
-                this.localPrivateKey = localPrivateKey;
-                this.peerPublicKey = peerPublicKey;
-            }
-
-            @Override
-            public SecretKey deriveKey(String algorithm,
-                    AlgorithmParameterSpec params) throws IOException {
-                if (!context.negotiatedProtocol.useTLS13PlusSpec()) {
-                    return t12DeriveKey(algorithm, params);
-                } else {
-                    return t13DeriveKey(algorithm, params);
-                }
-            }
-
-            private SecretKey t12DeriveKey(String algorithm,
-                    AlgorithmParameterSpec params) throws IOException {
-                try {
-                    KeyAgreement ka = JsseJce.getKeyAgreement("DiffieHellman");
-                    ka.init(localPrivateKey);
-                    ka.doPhase(peerPublicKey, true);
-                    SecretKey preMasterSecret =
-                            ka.generateSecret("TlsPremasterSecret");
-                    SSLMasterKeyDerivation mskd =
-                            SSLMasterKeyDerivation.valueOf(
-                                    context.negotiatedProtocol);
-                    if (mskd == null) {
-                        // unlikely
-                        throw new SSLHandshakeException(
-                            "No expected master key derivation for protocol: " +
-                            context.negotiatedProtocol.name);
-                    }
-                    SSLKeyDerivation kd = mskd.createKeyDerivation(
-                            context, preMasterSecret);
-                    return kd.deriveKey("MasterSecret", params);
-                } catch (GeneralSecurityException gse) {
-                    throw (SSLHandshakeException) new SSLHandshakeException(
-                        "Could not generate secret").initCause(gse);
-                }
-            }
-
-            private SecretKey t13DeriveKey(String algorithm,
-                    AlgorithmParameterSpec params) throws IOException {
-                try {
-                    KeyAgreement ka = JsseJce.getKeyAgreement("DiffieHellman");
-                    ka.init(localPrivateKey);
-                    ka.doPhase(peerPublicKey, true);
-                    SecretKey sharedSecret =
-                            ka.generateSecret("TlsPremasterSecret");
-
-                    HashAlg hashAlg = context.negotiatedCipherSuite.hashAlg;
-                    SSLKeyDerivation kd = context.handshakeKeyDerivation;
-                    HKDF hkdf = new HKDF(hashAlg.name);
-                    if (kd == null) {   // No PSK is in use.
-                        // If PSK is not in use Early Secret will still be
-                        // HKDF-Extract(0, 0).
-                        byte[] zeros = new byte[hashAlg.hashLength];
-                        SecretKeySpec ikm =
-                                new SecretKeySpec(zeros, "TlsPreSharedSecret");
-                        SecretKey earlySecret =
-                                hkdf.extract(zeros, ikm, "TlsEarlySecret");
-                        kd = new SSLSecretDerivation(context, earlySecret);
-                    }
-
-                    // derive salt secret
-                    SecretKey saltSecret = kd.deriveKey("TlsSaltSecret", null);
-
-                    // derive handshake secret
-                    return hkdf.extract(saltSecret, sharedSecret, algorithm);
-                } catch (GeneralSecurityException gse) {
-                    throw (SSLHandshakeException) new SSLHandshakeException(
-                        "Could not generate secret").initCause(gse);
-                }
-            }
         }
     }
 }

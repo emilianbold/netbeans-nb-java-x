@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2018 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,8 +23,8 @@
  *
  */
 
-#ifndef CPU_PPC_VM_ASSEMBLER_PPC_HPP
-#define CPU_PPC_VM_ASSEMBLER_PPC_HPP
+#ifndef CPU_PPC_ASSEMBLER_PPC_HPP
+#define CPU_PPC_ASSEMBLER_PPC_HPP
 
 #include "asm/register.hpp"
 
@@ -929,11 +929,13 @@ class Assembler : public AbstractAssembler {
 
   enum Predict { pt = 1, pn = 0 }; // pt = predict taken
 
-  // Instruction must start at passed address.
-  static int instr_len(unsigned char *instr) { return BytesPerInstWord; }
+  //---<  calculate length of instruction  >---
+  // With PPC64 being a RISC architecture, this always is BytesPerInstWord
+  // instruction must start at passed address
+  static unsigned int instr_len(unsigned char *instr) { return BytesPerInstWord; }
 
-  // longest instructions
-  static int instr_maxlen() { return BytesPerInstWord; }
+  //---<  longest instructions  >---
+  static unsigned int instr_maxlen() { return BytesPerInstWord; }
 
   // Test if x is within signed immediate range for nbits.
   static bool is_simm(int x, unsigned int nbits) {
@@ -2450,4 +2452,4 @@ class Assembler : public AbstractAssembler {
 };
 
 
-#endif // CPU_PPC_VM_ASSEMBLER_PPC_HPP
+#endif // CPU_PPC_ASSEMBLER_PPC_HPP

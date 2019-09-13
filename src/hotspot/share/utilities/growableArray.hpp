@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,8 +22,8 @@
  *
  */
 
-#ifndef SHARE_VM_UTILITIES_GROWABLEARRAY_HPP
-#define SHARE_VM_UTILITIES_GROWABLEARRAY_HPP
+#ifndef SHARE_UTILITIES_GROWABLEARRAY_HPP
+#define SHARE_UTILITIES_GROWABLEARRAY_HPP
 
 #include "memory/allocation.hpp"
 #include "oops/oop.hpp"
@@ -151,6 +151,12 @@ class GenericGrowableArray : public ResourceObj {
 
 template<class E> class GrowableArrayIterator;
 template<class E, class UnaryPredicate> class GrowableArrayFilterIterator;
+
+template<class E>
+class CompareClosure : public Closure {
+public:
+    virtual int do_compare(const E&, const E&) = 0;
+};
 
 template<class E> class GrowableArray : public GenericGrowableArray {
   friend class VMStructs;
@@ -443,6 +449,37 @@ template<class E> class GrowableArray : public GenericGrowableArray {
     }
     return min;
   }
+
+  E insert_sorted(CompareClosure<E>* cc, const E& key) {
+    bool found;
+    int location = find_sorted(cc, key, found);
+    if (!found) {
+      insert_before(location, key);
+    }
+    return at(location);
+  }
+
+  template<typename K>
+  int find_sorted(CompareClosure<E>* cc, const K& key, bool& found) {
+    found = false;
+    int min = 0;
+    int max = length() - 1;
+
+    while (max >= min) {
+      int mid = (int)(((uint)max + min) / 2);
+      E value = at(mid);
+      int diff = cc->do_compare(key, value);
+      if (diff > 0) {
+        min = mid + 1;
+      } else if (diff < 0) {
+        max = mid - 1;
+      } else {
+        found = true;
+        return mid;
+      }
+    }
+    return min;
+  }
 };
 
 // Global GrowableArray methods (one instance in the library per each 'E' type).
@@ -584,4 +621,4 @@ typedef GrowableArray<int> intArray;
 typedef GrowableArray<int> intStack;
 typedef GrowableArray<bool> boolArray;
 
-#endif // SHARE_VM_UTILITIES_GROWABLEARRAY_HPP
+#endif // SHARE_UTILITIES_GROWABLEARRAY_HPP

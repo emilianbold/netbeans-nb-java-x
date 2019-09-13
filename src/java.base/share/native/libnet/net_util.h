@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -107,7 +107,6 @@ extern jclass ia6_class;
 extern jfieldID ia6_holder6ID;
 extern jfieldID ia6_ipaddressID;
 extern jfieldID ia6_scopeidID;
-extern jfieldID ia6_cachedscopeidID;
 extern jfieldID ia6_scopeidsetID;
 extern jfieldID ia6_scopeifnameID;
 extern jmethodID ia6_ctrID;
@@ -126,6 +125,7 @@ void NET_ThrowCurrent(JNIEnv *env, char *msg);
 
 jfieldID NET_GetFileDescriptorID(JNIEnv *env);
 
+JNIEXPORT jint JNICALL ipv4_available();
 JNIEXPORT jint JNICALL ipv6_available();
 
 JNIEXPORT jint JNICALL reuseport_available();
@@ -179,6 +179,9 @@ int NET_IsZeroAddr(jbyte* caddr);
  * These work just like the system calls, except that they may do some
  * platform-specific pre/post processing of the arguments and/or results.
  */
+
+JNIEXPORT int JNICALL
+NET_SocketAvailable(int fd, int *pbytes);
 
 JNIEXPORT int JNICALL
 NET_GetSockOpt(int fd, int level, int opt, void *result, int *len);

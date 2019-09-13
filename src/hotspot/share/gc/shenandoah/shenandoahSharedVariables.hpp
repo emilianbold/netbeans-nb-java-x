@@ -21,8 +21,8 @@
  *
  */
 
-#ifndef SHARE_VM_GC_SHENANDOAH_SHENANDOAHSHAREDFLAG_HPP
-#define SHARE_VM_GC_SHENANDOAH_SHENANDOAHSHAREDFLAG_HPP
+#ifndef SHARE_GC_SHENANDOAH_SHENANDOAHSHAREDVARIABLES_HPP
+#define SHARE_GC_SHENANDOAH_SHENANDOAHSHAREDVARIABLES_HPP
 
 #include "memory/allocation.hpp"
 #include "runtime/orderAccess.hpp"
@@ -35,7 +35,7 @@ STATIC_ASSERT(sizeof(ShenandoahSharedValue) == 1);
 typedef struct ShenandoahSharedFlag {
   enum {
     UNSET = 0,
-    SET = 1,
+    SET = 1
   };
 
   DEFINE_PAD_MINUS_SIZE(0, DEFAULT_CACHE_LINE_SIZE, sizeof(volatile ShenandoahSharedValue));
@@ -62,8 +62,8 @@ typedef struct ShenandoahSharedFlag {
     return OrderAccess::load_acquire(&value) == UNSET;
   }
 
-  void set_cond(bool value) {
-    if (value) {
+  void set_cond(bool val) {
+    if (val) {
       set();
     } else {
       unset();
@@ -167,8 +167,8 @@ typedef struct ShenandoahSharedBitmap {
     return (OrderAccess::load_acquire(&value)) == 0;
   }
 
-  void set_cond(uint mask, bool value) {
-    if (value) {
+  void set_cond(uint mask, bool val) {
+    if (val) {
       set(mask);
     } else {
       unset(mask);
@@ -243,4 +243,4 @@ private:
 
 };
 
-#endif // SHARE_VM_GC_SHENANDOAH_SHENANDOAHSHAREDFLAG_HPP
+#endif // SHARE_GC_SHENANDOAH_SHENANDOAHSHAREDVARIABLES_HPP

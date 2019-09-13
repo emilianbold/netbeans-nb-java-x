@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,10 @@
 #include "sunfontids.h"
 #include "sun_font_FreetypeFontScaler.h"
 
-#include<stdlib.h>
+#include <stdlib.h>
+#if !defined(_WIN32) && !defined(__APPLE_)
+#include <dlfcn.h>
+#endif
 #include <math.h>
 #include "ft2build.h"
 #include FT_FREETYPE_H
@@ -39,6 +42,7 @@
 #include FT_OUTLINE_H
 #include FT_SYNTHESIS_H
 #include FT_LCD_FILTER_H
+#include FT_MODULE_H
 
 #include "fontscaler.h"
 
@@ -69,7 +73,6 @@ typedef struct {
     unsigned fontDataOffset;
     unsigned fontDataLength;
     unsigned fileSize;
-    TTLayoutTableCache* layoutTables;
 } FTScalerInfo;
 
 typedef struct FTScalerContext {
@@ -205,6 +208,52 @@ static unsigned long ReadTTFontFileFunc(FT_Stream stream,
     }
 }
 
+typedef FT_Error (*FT_Prop_Set_Func)(FT_Library library,
+                                     const FT_String*  module_name,
+                                     const FT_String*  property_name,
+                                     const void*       value );
+
+/**
+ * Prefer the older v35 freetype byte code interpreter.
+ */
+static void setInterpreterVersion(FT_Library library) {
+
+    char* props = getenv("FREETYPE_PROPERTIES");
+    int version = 35;
+    const char* module = "truetype";
+    const char* property = "interpreter-version";
+
+    /* If some one is setting this, don't override it */
+    if (props != NULL && strstr(property, props)) {
+        return;
+    }
+    /*
+     * FT_Property_Set was introduced in 2.4.11.
+     * Some older supported Linux OSes may not include it so look
+     * this up dynamically.
+     * And if its not available it doesn't matter, since the reason
+     * we need it dates from 2.7.
+     * On Windows & Mac the library is always bundled so it is safe
+     * to use directly in those cases.
+     */
+#if defined(_WIN32) || defined(__APPLE__)
+    FT_Property_Set(library, module, property, (void*)(&version));
+#else
+    void *lib = dlopen("libfreetype.so", RTLD_LOCAL|RTLD_LAZY);
+    if (lib == NULL) {
+        lib = dlopen("libfreetype.so.6", RTLD_LOCAL|RTLD_LAZY);
+        if (lib == NULL) {
+            return;
+        }
+    }
+    FT_Prop_Set_Func func = (FT_Prop_Set_Func)dlsym(lib, "FT_Property_Set");
+    if (func != NULL) {
+        func(library, module, property, (void*)(&version));
+    }
+    dlclose(lib);
+#endif
+}
+
 /*
  * Class:     sun_font_FreetypeFontScaler
  * Method:    initNativeScaler
@@ -244,6 +293,7 @@ Java_sun_font_FreetypeFontScaler_initNativeScaler(
         free(scalerInfo);
         return 0;
     }
+    setInterpreterVersion(scalerInfo->library);
 
 #define TYPE1_FROM_JAVA        2
 
@@ -251,7 +301,6 @@ Java_sun_font_FreetypeFontScaler_initNativeScaler(
     if (type == TYPE1_FROM_JAVA) { /* TYPE1 */
         scalerInfo->fontData = (unsigned char*) malloc(filesize);
         scalerInfo->directBuffer = NULL;
-        scalerInfo->layoutTables = NULL;
         scalerInfo->fontDataLength = filesize;
 
         if (scalerInfo->fontData != NULL) {
@@ -405,10 +454,18 @@ static int setupFTContext(JNIEnv *env,
     return errCode;
 }
 
-/* ftsynth.c uses (0x10000, 0x06000, 0x0, 0x10000) matrix to get oblique
-   outline.  Therefore x coordinate will change by 0x06000*y.
-   Note that y coordinate does not change. */
-#define OBLIQUE_MODIFIER(y)  (context->doItalize ? ((y)*6/16) : 0)
+/* ftsynth.c uses (0x10000, 0x0366A, 0x0, 0x10000) matrix to get oblique
+   outline.  Therefore x coordinate will change by 0x0366A*y.
+   Note that y coordinate does not change. These values are based on
+   libfreetype version 2.9.1. */
+#define OBLIQUE_MODIFIER(y)  (context->doItalize ? ((y)*0x366A/0x10000) : 0)
+
+/* FT_GlyphSlot_Embolden (ftsynth.c) uses FT_MulFix(units_per_EM, y_scale) / 24
+ * strength value when glyph format is FT_GLYPH_FORMAT_OUTLINE. This value has
+ * been taken from libfreetype version 2.6 and remain valid at least up to
+ * 2.9.1. */
+#define BOLD_MODIFIER(units_per_EM, y_scale) \
+    (context->doBold ? FT_MulFix(units_per_EM, y_scale) / 24 : 0)
 
 /*
  * Class:     sun_font_FreetypeFontScaler
@@ -495,7 +552,9 @@ Java_sun_font_FreetypeFontScaler_getFontMetricsNative(
     /* max advance */
     mx = (jfloat) FT26Dot6ToFloat(
                      scalerInfo->face->size->metrics.max_advance +
-                     OBLIQUE_MODIFIER(scalerInfo->face->size->metrics.height));
+                     OBLIQUE_MODIFIER(scalerInfo->face->size->metrics.height) +
+                     BOLD_MODIFIER(scalerInfo->face->units_per_EM,
+                             scalerInfo->face->size->metrics.y_scale));
     my = 0;
 
     metrics = (*env)->NewObject(env,
@@ -754,7 +813,10 @@ Java_sun_font_FreetypeFontScaler_getGlyphImageNative(
     /* generate bitmap if it is not done yet
      e.g. if algorithmic styling is performed and style was added to outline */
     if (ftglyph->format == FT_GLYPH_FORMAT_OUTLINE) {
-        FT_Render_Glyph(ftglyph, FT_LOAD_TARGET_MODE(target));
+        error = FT_Render_Glyph(ftglyph, FT_LOAD_TARGET_MODE(target));
+        if (error != 0) {
+            return ptr_to_jlong(getNullGlyphImage());
+        }
     }
 
     width  = (UInt16) ftglyph->bitmap.width;
@@ -851,32 +913,6 @@ Java_sun_font_FreetypeFontScaler_getGlyphImageNative(
     }
 
     return ptr_to_jlong(glyphInfo);
-}
-
-
-/*
- * Class:     sun_font_FreetypeFontScaler
- * Method:    getLayoutTableCacheNative
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL
-Java_sun_font_FreetypeFontScaler_getLayoutTableCacheNative(
-        JNIEnv *env, jobject scaler, jlong pScaler) {
-    FTScalerInfo *scalerInfo = (FTScalerInfo*) jlong_to_ptr(pScaler);
-
-    if (scalerInfo == NULL) {
-        invalidateJavaScaler(env, scaler, scalerInfo);
-        return 0L;
-    }
-
-    // init layout table cache in font
-    // we're assuming the font is a file font and moreover it is Truetype font
-    // otherwise we shouldn't be able to get here...
-    if (scalerInfo->layoutTables == NULL) {
-        scalerInfo->layoutTables = newLayoutTableCache();
-    }
-
-    return ptr_to_jlong(scalerInfo->layoutTables);
 }
 
 /*

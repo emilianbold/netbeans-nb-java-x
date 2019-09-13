@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -88,14 +88,14 @@ import com.sun.source.util.TreePathScanner;
 public class JavacParserTest extends TestCase {
     static final JavaCompiler tool = ToolProvider.getSystemJavaCompiler();
     static final JavaFileManager fm = tool.getStandardFileManager(null, null, null);
+    public static final String SOURCE_VERSION =
+        Integer.toString(Runtime.version().feature());
 
     private JavacParserTest(){}
 
     public static void main(String... args) throws Exception {
-        try {
+        try (fm) {
             new JavacParserTest().run(args);
-        } finally {
-            fm.close();
         }
     }
 
@@ -1083,12 +1083,12 @@ public class JavacParserTest extends TestCase {
                       "        }" +
                       "        int j = switch (i) {" +
                       "            case 0 -> i + 1;" +
-                      "            case 1 -> { break i + 1; }" +
+                      "            case 1 -> { yield i + 1; }" +
                       "            default -> throw new RuntimeException();" +
                       "        };" +
                       "        int k = switch (i) {" +
-                      "            case 0: break i + 1;" +
-                      "            case 1: { break i + 1; }" +
+                      "            case 0: yield i + 1;" +
+                      "            case 1: { yield i + 1; }" +
                       "            default: throw new RuntimeException();" +
                       "        };" +
                       "    }" +
@@ -1096,7 +1096,7 @@ public class JavacParserTest extends TestCase {
         String expectedErrors = "Test.java:1:178: compiler.err.switch.case.unexpected.statement\n";
         StringWriter out = new StringWriter();
         JavacTaskImpl ct = (JavacTaskImpl) tool.getTask(out, fm, null,
-                Arrays.asList("-XDrawDiagnostics", "--enable-preview", "-source", "12"),
+                Arrays.asList("-XDrawDiagnostics", "--enable-preview", "-source", SOURCE_VERSION),
                 null, Arrays.asList(new MyFileObject(code)));
 
         CompilationUnitTree cut = ct.parse().iterator().next();
@@ -1120,7 +1120,7 @@ public class JavacParserTest extends TestCase {
         List<String> expectedSpans = List.of(
                 "i++;", "{ i++; }", "throw new RuntimeException();", "if (true) ;", "i++;",
                 "<null>", "<null>", "<null>", "<null>", "<null>",
-                "i + 1"/*TODO semicolon?*/, "{ break i + 1; }", "throw new RuntimeException();",
+                "i + 1"/*TODO semicolon?*/, "{ yield i + 1; }", "throw new RuntimeException();",
                 "<null>", "<null>", "<null>");
         assertEquals("the error spans are not correct; actual:" + spans, expectedSpans, spans);
         String toString = normalize(cut.toString());
@@ -1162,19 +1162,19 @@ public class JavacParserTest extends TestCase {
                 "        \n" +
                 "        }\n" +
                 "        int j = switch (i) {\n" +
-                "        case 0 -> break i + 1;\n" +
+                "        case 0 -> yield i + 1;\n" +
                 "        case 1 -> {\n" +
-                "            break i + 1;\n" +
+                "            yield i + 1;\n" +
                 "        }\n" +
                 "        default -> throw new RuntimeException();\n" +
                 "        };\n" +
                 "        int k = switch (i) {\n" +
                 "        case 0:\n" +
-                "            break i + 1;\n" +
+                "            yield i + 1;\n" +
                 "        \n" +
                 "        case 1:\n" +
                 "            {\n" +
-                "                break i + 1;\n" +
+                "                yield i + 1;\n" +
                 "            }\n" +
                 "        \n" +
                 "        default:\n" +

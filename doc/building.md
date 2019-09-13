@@ -75,8 +75,8 @@ on where and how to check out the source code.
     network share for the source code, see below for suggestions on how to keep
     the build artifacts on a local disk.
 
-  * On Windows, extra care must be taken to make sure the [Cygwin](#cygwin)
-    environment is consistent. It is recommended that you follow this
+  * On Windows, if using [Cygwin](#cygwin), extra care must be taken to make sure
+    the environment is consistent. It is recommended that you follow this
     procedure:
 
       * Create the directory that is going to contain the top directory of the
@@ -150,14 +150,14 @@ time of writing.
 
  Operating system   Vendor/version used
  -----------------  -------------------------------------------------------
- Linux              Oracle Enterprise Linux 6.4 / 7.1 (using kernel 3.8.13)
- Solaris            Solaris 11.1 SRU 21.4.1 / 11.2 SRU 5.5
- macOS              Mac OS X 10.9 (Mavericks) / 10.10 (Yosemite)
+ Linux              Oracle Enterprise Linux 6.4 / 7.6
+ Solaris            Solaris 11.3 SRU 20
+ macOS              Mac OS X 10.13 (High Sierra)
  Windows            Windows Server 2012 R2
 
-The double version numbers for Linux, Solaris and macOS is due to the hybrid
-model used at Oracle, where header files and external libraries from an older
-version are used when building on a more modern version of the OS.
+The double version numbers for Linux and Solaris are due to the hybrid model
+used at Oracle, where header files and external libraries from an older version
+are used when building on a more modern version of the OS.
 
 The Build Group has a wiki page with [Supported Build Platforms](
 https://wiki.openjdk.java.net/display/Build/Supported+Build+Platforms). From
@@ -174,10 +174,10 @@ On Windows, it is important that you pay attention to the instructions in the
 
 Windows is the only non-POSIX OS supported by the JDK, and as such, requires
 some extra care. A POSIX support layer is required to build on Windows.
-Currently, the only supported such layer is Cygwin. (Msys is no longer
-supported due to a too old bash; msys2 and the new Windows Subsystem for Linux
-(WSL) would likely be possible to support in a future version but that would
-require effort to implement.)
+Currently, the only supported such layers are Cygwin and Windows Subsystem for
+Linux (WSL). (Msys is no longer supported due to a too old bash; msys2 would
+likely be possible to support in a future version but that would require effort
+to implement.)
 
 Internally in the build system, all paths are represented as Unix-style paths,
 e.g. `/cygdrive/c/hg/jdk9/Makefile` rather than `C:\hg\jdk9\Makefile`. This
@@ -188,7 +188,7 @@ on [Fixpath](#fixpath).
 
 #### Cygwin
 
-A functioning [Cygwin](http://www.cygwin.com/) environment is thus required for
+A functioning [Cygwin](http://www.cygwin.com/) environment is required for
 building the JDK on Windows. If you have a 64-bit OS, we strongly recommend
 using the 64-bit version of Cygwin.
 
@@ -198,7 +198,7 @@ that whenever you add or update a package in Cygwin, you might (inadvertently)
 update tools that are used by the JDK build process, and that can cause
 unexpected build problems.
 
-The JDK requires GNU Make 4.0 or greater on Windows. This is usually not a
+The JDK requires GNU Make 4.0 or greater in Cygwin. This is usually not a
 problem, since Cygwin currently only distributes GNU Make at a version above
 4.0.
 
@@ -220,6 +220,30 @@ experience build tool crashes or strange issues when building on Windows,
 please check the Cygwin FAQ on the ["BLODA" list](
 https://cygwin.com/faq/faq.html#faq.using.bloda) and the section on [fork()
 failures](https://cygwin.com/faq/faq.html#faq.using.fixing-fork-failures).
+
+#### Windows Subsystem for Linux (WSL)
+
+Windows 10 1809 or newer is supported due to a dependency on the wslpath utility
+and support for environment variable sharing through WSLENV. Version 1803 can
+work but intermittent build failures have been observed.
+
+It's possible to build both Windows and Linux binaries from WSL. To build
+Windows binaries, you must use a Windows boot JDK (located in a
+Windows-accessible directory). To build Linux binaries, you must use a Linux
+boot JDK. The default behavior is to build for Windows. To build for Linux, pass
+`--build=x86_64-unknown-linux-gnu --host=x86_64-unknown-linux-gnu` to
+`configure`.
+
+If building Windows binaries, the source code must be located in a Windows-
+accessible directory. This is because Windows executables (such as Visual Studio
+and the boot JDK) must be able to access the source code. Also, the drive where
+the source is stored must be mounted as case-insensitive by changing either
+/etc/fstab or /etc/wsl.conf in WSL. Individual directories may be corrected
+using the fsutil tool in case the source was cloned before changing the mount
+options.
+
+Note that while it's possible to build on WSL, testing is still not fully
+supported.
 
 ### Solaris
 
@@ -271,9 +295,9 @@ sudo yum groupinstall "Development Tools"
 
 ### AIX
 
-The regular builds by SAP is using AIX version 7.1, but AIX 5.3 is also
-supported. See the [OpenJDK PowerPC Port Status Page](
-http://cr.openjdk.java.net/~simonis/ppc-aix-port) for details.
+Please consult the AIX section of the [Supported Build Platforms](
+https://wiki.openjdk.java.net/display/Build/Supported+Build+Platforms) OpenJDK
+Build Wiki page for details about which versions of AIX are supported.
 
 ## Native Compiler (Toolchain) Requirements
 
@@ -299,10 +323,15 @@ issues.
 
  Operating system   Toolchain version
  ------------------ -------------------------------------------------------
- Linux              gcc 7.3.0
- macOS              Apple Xcode 9.4 (using clang 9.1.0)
- Solaris            Oracle Solaris Studio 12.4 (with compiler version 5.13)
- Windows            Microsoft Visual Studio 2017 update 15.5.5
+ Linux              gcc 8.2.0
+ macOS              Apple Xcode 10.1 (using clang 10.0.0)
+ Solaris            Oracle Solaris Studio 12.6 (with compiler version 5.15)
+ Windows            Microsoft Visual Studio 2017 update 15.9.6
+
+All compilers are expected to be able to compile to the C99 language standard,
+as some C99 features are used in the source code. Microsoft Visual Studio
+doesn't fully support C99 so in practice shared code is limited to using C99
+features that it does support.
 
 ### gcc
 
@@ -380,7 +409,7 @@ CC: Sun C++ 5.13 SunOS_i386 151846-10 2015/10/30
 
 The minimum accepted version of Visual Studio is 2010. Older versions will not
 be accepted by `configure`. The maximum accepted version of Visual Studio is
-2017. Versions older than 2017 are unlikely to continue working for long.
+2019. Versions older than 2017 are unlikely to continue working for long.
 
 If you have multiple versions of Visual Studio installed, `configure` will by
 default pick the latest. You can request a specific version to be used by
@@ -395,11 +424,10 @@ https://stackoverflow.com/questions/10888391) for other suggestions.
 
 ### IBM XL C/C++
 
-The regular builds by SAP is using version 12.1, described as `IBM XL C/C++ for
-AIX, V12.1 (5765-J02, 5725-C72) Version: 12.01.0000.0017`.
+Please consult the AIX section of the [Supported Build Platforms](
+https://wiki.openjdk.java.net/display/Build/Supported+Build+Platforms) OpenJDK
+Build Wiki page for details about which versions of XLC are supported.
 
-See the [OpenJDK PowerPC Port Status Page](
-http://cr.openjdk.java.net/~simonis/ppc-aix-port) for details.
 
 ## Boot JDK Requirements
 
@@ -699,9 +727,12 @@ can in turn be overriden at runtime by setting the `java.library.path` property.
 
 Certain third-party libraries used by the JDK (libjpeg, giflib, libpng, lcms
 and zlib) are included in the JDK repository. The default behavior of the
-JDK build is to use this version of these libraries, but they might be
-replaced by an external version. To do so, specify `system` as the `<source>`
-option in these arguments. (The default is `bundled`).
+JDK build is to use the included ("bundled") versions of libjpeg, giflib,
+libpng and lcms.
+For zlib, the system lib (if present) is used except on Windows and AIX.
+However the bundled libraries may be replaced by an external version.
+To do so, specify `system` as the `<source>` option in these arguments.
+(The default is `bundled`).
 
   * `--with-libjpeg=<source>` - Use the specified source for libjpeg
   * `--with-giflib=<source>` - Use the specified source for giflib

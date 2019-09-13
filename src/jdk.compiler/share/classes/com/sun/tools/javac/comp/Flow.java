@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -331,6 +331,12 @@ public class Flow {
                 JCTree getTarget(JCTree tree) {
                     return ((JCContinue)tree).target;
                 }
+            },
+            YIELD(JCTree.Tag.YIELD) {
+                @Override
+                JCTree getTarget(JCTree tree) {
+                    return ((JCYield)tree).target;
+                }
             };
 
             final JCTree.Tag treeTag;
@@ -403,6 +409,11 @@ public class Flow {
             return resolveJump(tree, oldPendingExits, JumpKind.BREAK);
         }
 
+        /** Resolve all yields of this statement. */
+        Liveness resolveYields(JCTree tree, ListBuffer<PendingExit> oldPendingExits) {
+            return resolveJump(tree, oldPendingExits, JumpKind.YIELD);
+        }
+
         @Override
         public void scan(JCTree tree) {
             if (tree != null && (
@@ -417,9 +428,15 @@ public class Flow {
         }
 
         protected void scanSyntheticBreak(TreeMaker make, JCTree swtch) {
-            JCBreak brk = make.at(Position.NOPOS).Break(null);
-            brk.target = swtch;
-            scan(brk);
+            if (swtch.hasTag(SWITCH_EXPRESSION)) {
+                JCYield brk = make.at(Position.NOPOS).Yield(null);
+                brk.target = swtch;
+                scan(brk);
+            } else {
+                JCBreak brk = make.at(Position.NOPOS).Break(null);
+                brk.target = swtch;
+                scan(brk);
+            }
         }
     }
 
@@ -536,7 +553,8 @@ public class Flow {
                 while (exits.nonEmpty()) {
                     PendingExit exit = exits.head;
                     exits = exits.tail;
-                    Assert.check(exit.tree.hasTag(RETURN) || log.getErrDiag(exit.tree) != null);
+                    Assert.check(exit.tree.hasTag(RETURN) ||
+                                    log.hasErrorOn(exit.tree.pos()));
                 }
             } finally {
                 lint = lintPrev;
@@ -696,7 +714,7 @@ public class Flow {
                 log.error(tree, Errors.NotExhaustive);
             }
             alive = prevAlive;
-            alive = alive.or(resolveBreaks(tree, prevPendingExits));
+            alive = alive.or(resolveYields(tree, prevPendingExits));
         }
 
         public void visitTry(JCTry tree) {
@@ -764,8 +782,12 @@ public class Flow {
         }
 
         public void visitBreak(JCBreak tree) {
-            if (tree.isValueBreak())
-                scan(tree.value);
+            recordExit(new PendingExit(tree));
+        }
+
+        @Override
+        public void visitYield(JCYield tree) {
+            scan(tree.value);
             recordExit(new PendingExit(tree));
         }
 
@@ -1055,7 +1077,8 @@ public class Flow {
                     PendingExit exit = exits.head;
                     exits = exits.tail;
                     if (!(exit instanceof ThrownPendingExit)) {
-                        Assert.check(exit.tree.hasTag(RETURN));
+                        Assert.check(exit.tree.hasTag(RETURN) ||
+                                         log.hasErrorOn(exit.tree.pos()));
                     } else {
                         // uncaught throws will be reported later
                         pendingExits.append(exit);
@@ -1150,7 +1173,11 @@ public class Flow {
                 scan(c.pats);
                 scan(c.stats);
             }
-            resolveBreaks(tree, prevPendingExits);
+            if (tree.hasTag(SWITCH_EXPRESSION)) {
+                resolveYields(tree, prevPendingExits);
+            } else {
+                resolveBreaks(tree, prevPendingExits);
+            }
         }
 
         public void visitTry(JCTry tree) {
@@ -1292,8 +1319,11 @@ public class Flow {
             }
 
         public void visitBreak(JCBreak tree) {
-            if (tree.isValueBreak())
-                scan(tree.value);
+            recordExit(new PendingExit(tree));
+        }
+
+        public void visitYield(JCYield tree) {
+            scan(tree.value);
             recordExit(new PendingExit(tree));
         }
 
@@ -1386,7 +1416,8 @@ public class Flow {
                     PendingExit exit = exits.head;
                     exits = exits.tail;
                     if (!(exit instanceof ThrownPendingExit)) {
-                        Assert.check(exit.tree.hasTag(RETURN));
+                        Assert.check(exit.tree.hasTag(RETURN) ||
+                                        log.hasErrorOn(exit.tree.pos()));
                     } else {
                         // uncaught throws will be reported later
                         pendingExits.append(exit);
@@ -2008,7 +2039,10 @@ public class Flow {
                     while (exits.nonEmpty()) {
                         PendingExit exit = exits.head;
                         exits = exits.tail;
-                        if (isInitialConstructor && exit.tree.hasTag(RETURN)) {
+                        Assert.check(exit.tree.hasTag(RETURN) ||
+                                         log.hasErrorOn(exit.tree.pos()),
+                                     exit.tree);
+                        if (isInitialConstructor) {
                             Assert.check(exit instanceof AssignPendingExit);
                             inits.assign(((AssignPendingExit) exit).exit_inits);
                             for (int i = firstadr; i < nextadr; i++) {
@@ -2258,9 +2292,17 @@ public class Flow {
                 // Warn about fall-through if lint switch fallthrough enabled.
             }
             if (!hasDefault) {
-                inits.andSet(initsSwitch);
+                if (tree.hasTag(SWITCH_EXPRESSION)) {
+                    markDead();
+                } else {
+                    inits.andSet(initsSwitch);
+                }
             }
-            resolveBreaks(tree, prevPendingExits);
+            if (tree.hasTag(SWITCH_EXPRESSION)) {
+                resolveYields(tree, prevPendingExits);
+            } else {
+                resolveBreaks(tree, prevPendingExits);
+            }
             nextadr = nextadrPrev;
         }
         // where
@@ -2427,35 +2469,37 @@ public class Flow {
 
         @Override
         public void visitBreak(JCBreak tree) {
-            if (tree.isValueBreak()) {
-                if (tree.target.hasTag(SWITCH_EXPRESSION)) {
-                    JCSwitchExpression expr = (JCSwitchExpression) tree.target;
-                    if (expr.type.hasTag(BOOLEAN)) {
-                        scanCond(tree.value);
-                        Bits initsAfterBreakWhenTrue = new Bits(initsWhenTrue);
-                        Bits initsAfterBreakWhenFalse = new Bits(initsWhenFalse);
-                        Bits uninitsAfterBreakWhenTrue = new Bits(uninitsWhenTrue);
-                        Bits uninitsAfterBreakWhenFalse = new Bits(uninitsWhenFalse);
-                        PendingExit exit = new PendingExit(tree) {
-                            @Override
-                            void resolveJump() {
-                                if (!inits.isReset()) {
-                                    split(true);
-                                }
-                                initsWhenTrue.andSet(initsAfterBreakWhenTrue);
-                                initsWhenFalse.andSet(initsAfterBreakWhenFalse);
-                                uninitsWhenTrue.andSet(uninitsAfterBreakWhenTrue);
-                                uninitsWhenFalse.andSet(uninitsAfterBreakWhenFalse);
-                            }
-                        };
-                        merge();
-                        recordExit(exit);
-                        return ;
-                    }
-                }
-                scan(tree.value);
-            }
             recordExit(new AssignPendingExit(tree, inits, uninits));
+        }
+
+        @Override
+        public void visitYield(JCYield tree) {
+            JCSwitchExpression expr = (JCSwitchExpression) tree.target;
+            if (expr != null && expr.type.hasTag(BOOLEAN)) {
+                scanCond(tree.value);
+                Bits initsAfterBreakWhenTrue = new Bits(initsWhenTrue);
+                Bits initsAfterBreakWhenFalse = new Bits(initsWhenFalse);
+                Bits uninitsAfterBreakWhenTrue = new Bits(uninitsWhenTrue);
+                Bits uninitsAfterBreakWhenFalse = new Bits(uninitsWhenFalse);
+                PendingExit exit = new PendingExit(tree) {
+                    @Override
+                    void resolveJump() {
+                        if (!inits.isReset()) {
+                            split(true);
+                        }
+                        initsWhenTrue.andSet(initsAfterBreakWhenTrue);
+                        initsWhenFalse.andSet(initsAfterBreakWhenFalse);
+                        uninitsWhenTrue.andSet(uninitsAfterBreakWhenTrue);
+                        uninitsWhenFalse.andSet(uninitsAfterBreakWhenFalse);
+                    }
+                };
+                merge();
+                recordExit(exit);
+                return ;
+            } else {
+                scan(tree.value);
+                recordExit(new AssignPendingExit(tree, inits, uninits));
+            }
         }
 
         @Override
@@ -2818,9 +2862,8 @@ public class Flow {
         }
 
         @Override
-        public void visitBreak(JCBreak tree) {
-            if (tree.isValueBreak())
-                scan(tree.value);
+        public void visitYield(JCYield tree) {
+            scan(tree.value);
         }
 
         public void visitModuleDef(JCModuleDecl tree) {

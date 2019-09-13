@@ -77,7 +77,7 @@
     <target name="-separate-jars">
         <jar destfile="${dist.dir}/javac-api.jar">
             <fileset dir="${build.classes.dir}">
-                <include name="com/sun/javadoc/**/*"/>
+               <!-- <include name="com/sun/javadoc/**/*"/> -->
                 <include name="com/sun/source/**/*"/>
                 <include name="javax/lang/**/*"/>
                 <include name="javax/tools/*"/>

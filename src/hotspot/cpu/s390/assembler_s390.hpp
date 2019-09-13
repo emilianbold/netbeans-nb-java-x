@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2016, 2017 SAP SE. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,8 @@
  *
  */
 
-#ifndef CPU_S390_VM_ASSEMBLER_S390_HPP
-#define CPU_S390_VM_ASSEMBLER_S390_HPP
+#ifndef CPU_S390_ASSEMBLER_S390_HPP
+#define CPU_S390_ASSEMBLER_S390_HPP
 
 #undef  LUCY_DBG
 
@@ -1531,16 +1531,16 @@ class Assembler : public AbstractAssembler {
   //-----------------------------------------------
 
   // Calculate length of instruction.
-  static int instr_len(unsigned char *instr);
+  static unsigned int instr_len(unsigned char *instr);
 
   // Longest instructions are 6 bytes on z/Architecture.
-  static int instr_maxlen() { return 6; }
+  static unsigned int instr_maxlen() { return 6; }
 
   // Average instruction is 4 bytes on z/Architecture (just a guess).
-  static int instr_avglen() { return 4; }
+  static unsigned int instr_avglen() { return 4; }
 
   // Shortest instructions are 2 bytes on z/Architecture.
-  static int instr_minlen() { return 2; }
+  static unsigned int instr_minlen() { return 2; }
 
   // Move instruction at pc right-justified into passed long int.
   // Return instr len in bytes as function result.
@@ -3284,4 +3284,4 @@ class Assembler : public AbstractAssembler {
 
 };
 
-#endif // CPU_S390_VM_ASSEMBLER_S390_HPP
+#endif // CPU_S390_ASSEMBLER_S390_HPP
