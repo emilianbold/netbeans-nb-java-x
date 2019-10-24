@@ -554,6 +554,10 @@ public class Modules extends JCTree.Visitor {
                 module = rootModules.iterator().next();
                 module.complete();
                 module.completer = sym -> completeModule((ModuleSymbol) sym);
+            } else if (c == null) {
+                Assert.checkNonNull(defaultModule);
+                module = defaultModule;
+                rootModules.add(module);
             } else {
                 Assert.check(rootModules.isEmpty());
                 Assert.checkNonNull(c);
