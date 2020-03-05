@@ -51,37 +51,6 @@ import java.lang.reflect.Method;
 public abstract class JavacTask implements CompilationTask {
 
     /**
-     * Returns the {@code JavacTask} for a {@code ProcessingEnvironment}.
-     * If the compiler is being invoked using a
-     * {@link javax.tools.JavaCompiler.CompilationTask CompilationTask},
-     * then that task will be returned.
-     * @param processingEnvironment the processing environment
-     * @return the {@code JavacTask} for a {@code ProcessingEnvironment}
-     * @since 1.8
-     */
-    public static JavacTask instance(ProcessingEnvironment processingEnvironment) {
-        if (!processingEnvironment.getClass().getName().equals(
-                "com.sun.tools.javac.processing.JavacProcessingEnvironment"))
-            throw new IllegalArgumentException();
-        try {
-            //Cannot refer to the implementation directly, needs to use reflection:
-            Method m = processingEnvironment.getClass().getMethod("getJavacTask");
-
-            return (JavacTask) m.invoke(processingEnvironment);
-        } catch (NoSuchMethodException ex) {
-            throw new UnsupportedOperationException(ex);
-        } catch (SecurityException ex) {
-            throw new UnsupportedOperationException(ex);
-        } catch (IllegalAccessException ex) {
-            throw new UnsupportedOperationException(ex);
-        } catch (IllegalArgumentException ex) {
-            throw new UnsupportedOperationException(ex);
-        } catch (InvocationTargetException ex) {
-            throw new UnsupportedOperationException(ex);
-        }
-    }
-
-    /**
      * Parses the specified files returning a list of abstract syntax trees.
      *
      * @return a list of abstract syntax trees
