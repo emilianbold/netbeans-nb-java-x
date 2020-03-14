@@ -34,6 +34,7 @@ import java.util.*;
 import com.sun.tools.javac.code.Source.Feature;
 import com.sun.tools.javac.util.DefinedBy;
 import com.sun.tools.javac.util.DefinedBy.Api;
+import java.lang.reflect.Method;
 
 /**
  * Object providing state about a prior round of annotation processing.
@@ -124,7 +125,7 @@ public class JavacRoundEnvironment implements RoundEnvironment {
 
         Set<Element> result = Collections.emptySet();
         @SuppressWarnings("preview")
-        var scanner = new AnnotationSetScanner(result);
+        AnnotationSetScanner scanner = new AnnotationSetScanner(result);
 
         for (Element element : rootElements)
             result = scanner.scan(element, a);
@@ -145,7 +146,7 @@ public class JavacRoundEnvironment implements RoundEnvironment {
 
         Set<Element> result = Collections.emptySet();
         @SuppressWarnings("preview")
-        var scanner = new AnnotationSetMultiScanner(result);
+        AnnotationSetMultiScanner scanner = new AnnotationSetMultiScanner(result);
 
         for (Element element : rootElements)
             result = scanner.scan(element, annotationSet);
@@ -156,7 +157,7 @@ public class JavacRoundEnvironment implements RoundEnvironment {
     // Could be written as a local class inside getElementsAnnotatedWith
     @SuppressWarnings("preview")
     private class AnnotationSetScanner extends
-        ElementScanner14<Set<Element>, TypeElement> {
+        ElementScanner9<Set<Element>, TypeElement> {
         // Insertion-order preserving set
         private Set<Element> annotatedElements = new LinkedHashSet<>();
 
@@ -272,7 +273,16 @@ public class JavacRoundEnvironment implements RoundEnvironment {
         if (annotationElement != null)
             return annotationElement;
         else if (allowModules) {
-            String moduleName = Objects.requireNonNullElse(annotation.getModule().getName(), "");
+            String moduleName = "";
+            try {
+                Method mth = annotation.getClass().getDeclaredMethod("getModule");
+                if (mth != null) {
+                    Object retObj = mth.invoke(annotation);
+                    if (retObj instanceof String) {
+                        moduleName = (String) retObj;
+                    }
+                }
+            } catch (Exception e) {}
             return eltUtils.getTypeElement(eltUtils.getModuleElement(moduleName), name);
         } else {
             return null;

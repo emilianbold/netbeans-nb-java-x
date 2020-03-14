@@ -194,6 +194,8 @@ public class ClientCodeWrapper {
     }
 
     protected boolean isTrusted(Object o) {
+        if (o == null)
+            return true;
         Class<?> c = o.getClass();
         Boolean trusted = trustedClasses.get(c);
         if (trusted == null) {
@@ -459,7 +461,7 @@ public class ClientCodeWrapper {
             }
         }
 
-        @Deprecated(since = "13")
+        @Deprecated()
         @Override @DefinedBy(Api.COMPILER)
         public Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths(Iterable<? extends Path> paths) {
             try {

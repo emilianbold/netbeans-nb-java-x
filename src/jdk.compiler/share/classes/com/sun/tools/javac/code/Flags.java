@@ -365,6 +365,9 @@ public class Flags {
      *  accessors and fields
      */
     public static final int GENERATED_MEMBER = 1<<24; // MethodSymbols and VarSymbols
+     public static final long FROMCLASS = 1L<<63;
+    //public static final long FROMCLASS = 1L<<61;
+    public static final long APT_CLEANED = 1L<<62;
 
     /** Modifier masks.
      */

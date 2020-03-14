@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- You may freely edit this file. See harness/README in the NetBeans platform -->
+<!-- for some information on what you could do (e.g. targets to override). -->
+<!-- If you delete this file and reopen the project it will be recreated. -->
+<project name="nb-javac-modules" basedir=".">
+    <description>Builds the module suite nb-javac-modules.</description>
+    <import file="nbproject/build-impl.xml"/>
+    <target name="-init" depends="suite.-init">
+        <ant dir="../nb-javac" target="clean" inheritAll="false" inheritRefs="false" />
+        <ant dir="../nb-javac" target="jar" inheritAll="false" inheritRefs="false" />
+        <mkdir dir="api/release/modules/ext/" />
+        <copy file="../nb-javac/dist/javac-api.jar" tofile="api/release/modules/ext/nb-javac-api.jar" />
+        <mkdir dir="impl/release/modules/ext/" />
+        <copy file="../nb-javac/dist/javac-impl.jar" tofile="impl/release/modules/ext/nb-javac-impl.jar" />
+    </target>
+</project>

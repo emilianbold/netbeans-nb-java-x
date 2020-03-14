@@ -69,7 +69,7 @@ public abstract class AbstractAnnotationValueVisitor7<R, P> extends AbstractAnno
      * @deprecated Release 7 is obsolete; update to a visitor for a newer
      * release level.
      */
-    @Deprecated(since="12")
+    @Deprecated
     protected AbstractAnnotationValueVisitor7() {
         super(); // Superclass constructor deprecated too
     }

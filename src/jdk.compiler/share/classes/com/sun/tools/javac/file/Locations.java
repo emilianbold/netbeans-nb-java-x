@@ -77,8 +77,6 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardJavaFileManager.PathFactory;
 import javax.tools.StandardLocation;
 
-import jdk.internal.jmod.JmodFile;
-
 import com.sun.tools.javac.code.Lint;
 import com.sun.tools.javac.code.Lint.LintCategory;
 import com.sun.tools.javac.main.Option;
@@ -1452,42 +1450,6 @@ public class Locations {
 
                     log.error(Errors.LocnCantGetModuleNameForJar(p));
                     return null;
-                }
-
-                if (p.getFileName().toString().endsWith(".jmod")) {
-                    try {
-                        // check if the JMOD file is valid
-                        JmodFile.checkMagic(p);
-
-                        // No JMOD file system.  Use JarFileSystem to
-                        // workaround for now
-                        FileSystem fs = fileSystems.get(p);
-                        if (fs == null) {
-                            FileSystemProvider jarFSProvider = fsInfo.getJarFSProvider();
-                            if (jarFSProvider == null) {
-                                log.error(Errors.LocnCantReadFile(p));
-                                return null;
-                            }
-                            fs = jarFSProvider.newFileSystem(p, Collections.emptyMap());
-                            try {
-                                Path moduleInfoClass = fs.getPath("classes/module-info.class");
-                                String moduleName = readModuleName(moduleInfoClass);
-                                Path modulePath = fs.getPath("classes");
-                                fileSystems.put(p, fs);
-                                closeables.add(fs);
-                                fs = null; // prevent fs being closed in the finally clause
-                                return new Pair<>(moduleName, modulePath);
-                            } finally {
-                                if (fs != null)
-                                    fs.close();
-                            }
-                        }
-                    } catch (ModuleNameReader.BadClassFile e) {
-                        log.error(Errors.LocnBadModuleInfo(p));
-                    } catch (IOException e) {
-                        log.error(Errors.LocnCantReadFile(p));
-                        return null;
-                    }
                 }
 
                 if (warn && false) {  // temp disable, when enabled, massage examples.not-yet.txt suitably.

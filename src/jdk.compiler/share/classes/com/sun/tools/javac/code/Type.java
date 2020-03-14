@@ -47,6 +47,7 @@ import static com.sun.tools.javac.code.BoundKind.*;
 import static com.sun.tools.javac.code.Flags.*;
 import static com.sun.tools.javac.code.Kinds.Kind.*;
 import static com.sun.tools.javac.code.TypeTag.*;
+import com.sun.tools.javac.jvm.PoolConstant.LoadableConstant;
 
 /** This class represents Java types. The class itself defines the behavior of
  *  the following types:
@@ -943,7 +944,7 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
         }
     }
 
-    public static class ClassType extends Type implements DeclaredType, LoadableConstant,
+    public static class ClassType extends Type implements DeclaredType, com.sun.tools.javac.jvm.PoolConstant.LoadableConstant,
                                                           javax.lang.model.type.ErrorType {
 
         /** The enclosing type of this type. If this is the type of an inner
@@ -1029,7 +1030,7 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
         @DefinedBy(Api.LANGUAGE_MODEL)
         public String toString() {
             StringBuilder buf = new StringBuilder();
-            if (getEnclosingType().hasTag(CLASS) && tsym.owner.kind == TYP) {
+            if (getEnclosingType() != null && getEnclosingType().hasTag(CLASS) && tsym.owner.kind == TYP) {
                 buf.append(getEnclosingType().toString());
                 buf.append(".");
                 appendAnnotationsString(buf);
@@ -1080,7 +1081,9 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
         @DefinedBy(Api.LANGUAGE_MODEL)
         public List<Type> getTypeArguments() {
             if (typarams_field == null) {
-                complete();
+                try {
+                    complete();
+                } catch (CompletionFailure e) {}
                 if (typarams_field == null)
                     typarams_field = List.nil();
             }
@@ -1102,7 +1105,11 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
 
         public List<Type> allparams() {
             if (allparams_field == null) {
-                allparams_field = getTypeArguments().prependList(getEnclosingType().allparams());
+                final Type enclosingType = getEnclosingType();
+                if (enclosingType == null)
+                    allparams_field = getTypeArguments();
+                else
+                    allparams_field = getTypeArguments().prependList(enclosingType.allparams());
             }
             return allparams_field;
         }
@@ -1294,7 +1301,7 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
     }
 
     public static class ArrayType extends Type
-            implements LoadableConstant, javax.lang.model.type.ArrayType {
+            implements com.sun.tools.javac.jvm.PoolConstant.LoadableConstant, javax.lang.model.type.ArrayType {
 
         public Type elemtype;
 
@@ -1433,7 +1440,7 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
         }
     }
 
-    public static class MethodType extends Type implements ExecutableType, LoadableConstant {
+    public static class MethodType extends Type implements ExecutableType, com.sun.tools.javac.jvm.PoolConstant.LoadableConstant {
 
         public List<Type> argtypes;
         public Type restype;
@@ -2243,7 +2250,10 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
 
         @Override
         public boolean isCompound() { return false; }
-    }
+
+        @Override
+        public boolean isInterface() { return false; }
+   }
 
     /** Represents VOID.
      */
@@ -2382,7 +2392,7 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
             return true;
         }
 
-        public ErrorType(Name name, TypeSymbol container, Type originalType) {
+        public ErrorType(Name name, Symbol container, Type originalType) {
             this(new ClassSymbol(PUBLIC|STATIC|ACYCLIC, name, null, container), originalType);
         }
 
@@ -2418,6 +2428,15 @@ public abstract class Type extends AnnoConstruct implements TypeMirror, PoolCons
         @DefinedBy(Api.LANGUAGE_MODEL)
         public <R, P> R accept(TypeVisitor<R, P> v, P p) {
             return v.visitError(this, p);
+        }
+
+        @Override
+        public String toString() {
+            if (tsym == null)
+                return "<error>";
+            if (tsym.type != this)
+                return tsym.name.table.names.any.toString();
+            return super.toString();
         }
     }
 

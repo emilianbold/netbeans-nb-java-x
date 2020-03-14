@@ -210,7 +210,7 @@ public class DelegatingJavaFileManager implements JavaFileManager {
             return baseSJFM.getJavaFileObjectsFromPaths(paths);
         }
 
-        @Deprecated(since = "13")
+        @Deprecated
         @Override
         public Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths
                                                   (Iterable<? extends Path> paths) {

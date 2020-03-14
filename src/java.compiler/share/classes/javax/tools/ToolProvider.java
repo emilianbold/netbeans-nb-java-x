@@ -25,12 +25,6 @@
 
 package javax.tools;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.util.Iterator;
-import java.util.ServiceConfigurationError;
-import java.util.ServiceLoader;
-
 /**
  * Provides methods for locating tool providers, for example,
  * providers of compilers.  This class complements the
@@ -47,7 +41,7 @@ public class ToolProvider {
     /**
      * Do not call.
      */
-    @Deprecated(forRemoval=true, since="14")
+    @Deprecated()
     public ToolProvider() {}
 
     /**
@@ -100,7 +94,7 @@ public class ToolProvider {
      * locate system tools as well as user-installed tools.
      * @return a class loader, or {@code null}
      */
-    @Deprecated(since="9")
+    @Deprecated()
     public static ClassLoader getSystemToolClassLoader() {
         return null;
     }
@@ -119,33 +113,11 @@ public class ToolProvider {
      * @return the specified implementation of the tool
      */
     private static <T> T getSystemTool(Class<T> clazz, String moduleName, String className) {
-
         try {
-            ServiceLoader<T> sl = ServiceLoader.load(clazz, ClassLoader.getSystemClassLoader());
-            for (Iterator<T> iter = sl.iterator(); iter.hasNext(); ) {
-                T tool = iter.next();
-                if (matches(tool, moduleName))
-                    return tool;
-            }
-        } catch (ServiceConfigurationError e) {
+            return Class.forName(className, true, Thread.currentThread().getContextClassLoader()).
+                asSubclass(clazz).getConstructor().newInstance();
+        } catch (ReflectiveOperationException e) {
             throw new Error(e);
         }
-        return null;
-    }
-
-    /**
-     * Determine if this is the desired tool instance.
-     * @param <T>               the interface of the tool
-     * @param tool              the instance of the tool
-     * @param moduleName        the name of the module containing the desired implementation
-     * @return true if and only if the tool matches the specified criteria
-     */
-    private static <T> boolean matches(T tool, String moduleName) {
-        PrivilegedAction<Boolean> pa = () -> {
-            Module toolModule = tool.getClass().getModule();
-            String toolModuleName = toolModule.getName();
-            return toolModuleName.equals(moduleName);
-        };
-        return AccessController.doPrivileged(pa);
     }
 }

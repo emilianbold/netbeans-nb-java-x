@@ -219,23 +219,39 @@ public enum SourceVersion {
 
     private static final SourceVersion latestSupported = getLatestSupported();
 
-    /*
-     * The integer version to enum constant mapping implemented by
-     * this method assumes the JEP 322: "Time-Based Release
-     * Versioning" scheme is in effect. This scheme began in JDK
-     * 10. If the JDK versioning scheme is revised, this method may
-     * need to be updated accordingly.
-     */
     private static SourceVersion getLatestSupported() {
-        int intVersion = Runtime.version().feature();
-        return (intVersion >= 11) ?
-            valueOf("RELEASE_" + Math.min(14, intVersion)):
-            RELEASE_10;
+        try {
+            String specVersion = System.getProperty("java.specification.version");
+
+            switch (specVersion) {
+                case "14":
+                    return RELEASE_14;
+                case "13":
+                    return RELEASE_13;
+                case "12":
+                    return RELEASE_12;
+                case "11":
+                    return RELEASE_11;
+                case "10":
+                    return RELEASE_10;
+                case "9":
+                    return RELEASE_9;
+                case "1.8":
+                    return RELEASE_8;
+                case "1.7":
+                    return RELEASE_7;
+                case "1.6":
+                    return RELEASE_6;
+            }
+        } catch (SecurityException se) {
+        }
+
+        return RELEASE_5;
     }
 
     /**
      * Returns the latest source version fully supported by the
-     * current execution environment.  {@code RELEASE_9} or later must
+     * current execution environment.  {@code RELEASE_5} or later must
      * be returned.
      *
      * @apiNote This method is included alongside {@link latest} to
@@ -435,3 +451,4 @@ public enum SourceVersion {
         }
     }
 }
+

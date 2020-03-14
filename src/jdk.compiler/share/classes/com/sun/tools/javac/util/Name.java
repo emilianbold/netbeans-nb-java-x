@@ -28,6 +28,7 @@ package com.sun.tools.javac.util;
 import com.sun.tools.javac.jvm.ClassFile;
 import com.sun.tools.javac.jvm.PoolConstant;
 import com.sun.tools.javac.util.DefinedBy.Api;
+import com.sun.tools.javac.model.LazyTreeLoader;
 
 /** An abstraction for internal compiler strings. They are stored in
  *  Utf8 format. Names are stored in a Name.Table, and are unique within
@@ -51,6 +52,9 @@ public abstract class Name implements javax.lang.model.element.Name, PoolConstan
      */
     @DefinedBy(Api.LANGUAGE_MODEL)
     public boolean contentEquals(CharSequence cs) {
+        if (cs instanceof Name && table == ((Name)cs).table) {
+            return getIndex() == ((Name)cs).getIndex();
+        }
         return toString().equals(cs.toString());
     }
 
@@ -210,8 +214,14 @@ public abstract class Name implements javax.lang.model.element.Name, PoolConstan
          */
         public final Names names;
 
-        Table(Names names) {
+        /** The tree loader
+         */
+        public LazyTreeLoader loader;
+
+
+        Table(Names names, Context context) {
             this.names = names;
+            loader = LazyTreeLoader.instance(context);
         }
 
         /** Get the name from the characters in cs[start..start+len-1].

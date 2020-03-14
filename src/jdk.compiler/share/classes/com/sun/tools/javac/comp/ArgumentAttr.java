@@ -168,7 +168,7 @@ public class ArgumentAttr extends JCTree.Visitor {
      * the risk of polluting enclosing contexts. This is useful when attempting speculative
      * attribution of potentially erroneous expressions, which could end up polluting the cache.
      */
-    LocalCacheContext withLocalCacheContext() {
+    public LocalCacheContext withLocalCacheContext() {
         return new LocalCacheContext();
     }
 
@@ -176,7 +176,7 @@ public class ArgumentAttr extends JCTree.Visitor {
      * Local cache context; this class keeps track of the previous cache and reverts to it
      * when the {@link LocalCacheContext#leave()} method is called.
      */
-    class LocalCacheContext {
+    public class LocalCacheContext {
         Map<UniquePos, ArgumentType<?>> prevCache;
 
         public LocalCacheContext() {
@@ -711,7 +711,7 @@ public class ArgumentAttr extends JCTree.Visitor {
 
         @Override
         ResultInfo resultInfo(ResultInfo resultInfo) {
-            return resultInfo.dup(attr.diamondContext(speculativeTree, speculativeTree.clazz.type.tsym, resultInfo.checkContext));
+            return resultInfo.dup(attr.diamondContext((JCNewClass) tree, speculativeTree.clazz.type.tsym, resultInfo.checkContext));
         }
 
         @Override

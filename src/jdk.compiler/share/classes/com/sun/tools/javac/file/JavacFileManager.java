@@ -28,8 +28,6 @@ package com.sun.tools.javac.file;
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.lang.module.Configuration;
-import java.lang.module.ModuleFinder;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -97,9 +95,10 @@ import static javax.tools.StandardLocation.*;
  */
 public class JavacFileManager extends BaseFileManager implements StandardJavaFileManager {
 
+    @SuppressWarnings("cast")
     public static char[] toArray(CharBuffer buffer) {
         if (buffer.hasArray())
-            return buffer.compact().flip().array();
+            return ((CharBuffer)buffer.compact().flip()).array();
         else
             return buffer.toString().toCharArray();
     }
@@ -107,7 +106,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
     private FSInfo fsInfo;
 
     private static final Set<JavaFileObject.Kind> SOURCE_OR_CLASS =
-        Set.of(JavaFileObject.Kind.SOURCE, JavaFileObject.Kind.CLASS);
+        EnumSet.of(JavaFileObject.Kind.SOURCE, JavaFileObject.Kind.CLASS);
 
     protected boolean symbolFileEnabled;
 
@@ -550,8 +549,8 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
         }
     }
 
-    private static final Set<FileVisitOption> NO_FILE_VISIT_OPTIONS = Set.of();
-    private static final Set<FileVisitOption> FOLLOW_LINKS_OPTIONS = Set.of(FOLLOW_LINKS);
+    private static final Set<FileVisitOption> NO_FILE_VISIT_OPTIONS = Collections.emptySet();
+    private static final Set<FileVisitOption> FOLLOW_LINKS_OPTIONS = EnumSet.of(FOLLOW_LINKS);
 
     private final class ArchiveContainer implements Container {
         private final Path archivePath;
@@ -1142,19 +1141,7 @@ public class JavacFileManager extends BaseFileManager implements StandardJavaFil
 
     @Override @DefinedBy(Api.COMPILER)
     public <S> ServiceLoader<S> getServiceLoader(Location location, Class<S> service) throws IOException {
-        nullCheck(location);
-        nullCheck(service);
-        getClass().getModule().addUses(service);
-        if (location.isModuleOrientedLocation()) {
-            Collection<Path> paths = locations.getLocation(location);
-            ModuleFinder finder = ModuleFinder.of(paths.toArray(new Path[paths.size()]));
-            ModuleLayer bootLayer = ModuleLayer.boot();
-            Configuration cf = bootLayer.configuration().resolveAndBind(ModuleFinder.of(), finder, Collections.emptySet());
-            ModuleLayer layer = bootLayer.defineModulesWithOneLoader(cf, ClassLoader.getSystemClassLoader());
-            return ServiceLoader.load(layer, service);
-        } else {
-            return ServiceLoader.load(service, getClassLoader(location));
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override @DefinedBy(Api.COMPILER)

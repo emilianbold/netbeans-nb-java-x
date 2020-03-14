@@ -44,6 +44,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.NestingKind;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
 import javax.tools.*;
 import javax.tools.JavaFileManager.Location;
 
@@ -424,14 +425,14 @@ public class JavacFiler implements Filer, Closeable {
     public JavaFileObject createSourceFile(CharSequence nameAndModule,
                                            Element... originatingElements) throws IOException {
         Pair<ModuleSymbol, String> moduleAndClass = checkOrInferModule(nameAndModule);
-        return createSourceOrClassFile(moduleAndClass.fst, true, moduleAndClass.snd);
+        return createSourceOrClassFile(moduleAndClass.fst, true, moduleAndClass.snd, originatingElements);
     }
 
     @Override @DefinedBy(Api.ANNOTATION_PROCESSING)
     public JavaFileObject createClassFile(CharSequence nameAndModule,
                                           Element... originatingElements) throws IOException {
         Pair<ModuleSymbol, String> moduleAndClass = checkOrInferModule(nameAndModule);
-        return createSourceOrClassFile(moduleAndClass.fst, false, moduleAndClass.snd);
+        return createSourceOrClassFile(moduleAndClass.fst, false, moduleAndClass.snd, originatingElements);
     }
 
     private Pair<ModuleSymbol, String> checkOrInferModule(CharSequence moduleAndPkg) throws FilerException {
@@ -475,9 +476,8 @@ public class JavacFiler implements Filer, Closeable {
         return Pair.of(explicitModule, pkg);
     }
 
-    private JavaFileObject createSourceOrClassFile(ModuleSymbol mod, boolean isSourceFile, String name) throws IOException {
+    private JavaFileObject createSourceOrClassFile(ModuleSymbol mod, boolean isSourceFile, String name, final Element[] originatingElements) throws IOException {
         Assert.checkNonNull(mod);
-
         if (lint) {
             int periodIndex = name.lastIndexOf(".");
             if (periodIndex != -1) {
@@ -497,8 +497,19 @@ public class JavacFiler implements Filer, Closeable {
                                     JavaFileObject.Kind.SOURCE :
                                     JavaFileObject.Kind.CLASS);
 
-        JavaFileObject fileObject =
-            fileManager.getJavaFileForOutput(loc, name, kind, null);
+        JavaFileObject fileObject;
+        final Collection<String> urls = getElementURLs(originatingElements);
+        final boolean hasElements = !urls.isEmpty();
+        if (hasElements) {
+            fileManager.handleOption("apt-source-element", urls.iterator());
+        }
+        try {
+            fileObject = fileManager.getJavaFileForOutput(loc, name, kind, null);
+        } finally {
+            if (hasElements) {
+                fileManager.handleOption("apt-source-element", Collections.<String>emptySet().iterator());
+            }
+        }
         checkFileReopening(fileObject, true);
 
         if (lastRound)
@@ -529,9 +540,19 @@ public class JavacFiler implements Filer, Closeable {
         if (strPkg.length() > 0)
             checkName(strPkg);
 
-        FileObject fileObject =
-            fileManager.getFileForOutput(location, strPkg,
-                                         relativeName.toString(), null);
+        FileObject fileObject;
+        final Collection<String> urls = getElementURLs(originatingElements);
+        final boolean hasElements = !urls.isEmpty();
+        if (hasElements) {
+            fileManager.handleOption("apt-resource-element", urls.iterator());
+        }
+        try {
+            fileObject = fileManager.getFileForOutput(location, strPkg, relativeName.toString(), null);
+        } finally {
+            if (hasElements) {
+                fileManager.handleOption("apt-resource-element", Collections.<String>emptySet().iterator());
+            }
+        }
         checkFileReopening(fileObject, true);
 
         if (fileObject instanceof JavaFileObject)
@@ -547,6 +568,29 @@ public class JavacFiler implements Filer, Closeable {
                 throw new IllegalArgumentException("Resource creation not supported in location " +
                                                    stdLoc);
         }
+    }
+
+    private static Collection<String> getElementURLs(final Element[] originatingElements) {
+        if (originatingElements == null) {
+            return Collections.<String>emptySet();
+        }
+        final Set<String> result = new HashSet<String>(originatingElements.length);
+        for (final Element oe : originatingElements) {
+            final ClassSymbol te  = findTopLevel(oe);
+            if (te != null && te.classfile != null) {
+                result.add(te.classfile.toUri().toString());
+            }
+        }
+        return result;
+    }
+
+    private static ClassSymbol findTopLevel (Element e) {
+        Element prev = null;
+        while (e != null && e.getKind() != ElementKind.PACKAGE) {
+            prev = e;
+            e = e.getEnclosingElement();
+        }
+        return e == null ? null : (ClassSymbol) prev;
     }
 
     @Override @DefinedBy(Api.ANNOTATION_PROCESSING)

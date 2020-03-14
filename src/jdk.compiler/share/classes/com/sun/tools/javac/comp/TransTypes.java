@@ -173,7 +173,7 @@ public class TransTypes extends TreeTranslator {
      */
     JCExpression retype(JCExpression tree, Type erasedType, Type target) {
 //      System.err.println("retype " + tree + " to " + erasedType);//DEBUG
-        if (!erasedType.isPrimitive()) {
+        if (erasedType != null && !erasedType.isPrimitive()) {
             if (target != null && target.isPrimitive()) {
                 target = erasure(tree.type);
             }
@@ -369,6 +369,11 @@ public class TransTypes extends TreeTranslator {
         private boolean isBridgeNeeded(MethodSymbol method,
                                        MethodSymbol impl,
                                        Type dest) {
+            if (method.type.isErroneous())
+                return false;
+            Type memberType = types.memberType(dest, method);
+            if (memberType != null && memberType.isErroneous())
+                return false;
             if (impl != method) {
                 // If either method or impl have different erasures as
                 // members of dest, a bridge is needed.

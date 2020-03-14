@@ -71,6 +71,8 @@ import static javax.tools.StandardLocation.CLASS_OUTPUT;
 public class ClassWriter extends ClassFile {
     protected static final Context.Key<ClassWriter> classWriterKey = new Context.Key<>();
 
+    private final Symtab syms;
+
     private final Options options;
 
     /** Switch: verbose output.
@@ -166,6 +168,7 @@ public class ClassWriter extends ClassFile {
 
         log = Log.instance(context);
         names = Names.instance(context);
+        syms = Symtab.instance(context);
         options = Options.instance(context);
         preview = Preview.instance(context);
         target = Target.instance(context);
@@ -371,8 +374,18 @@ public class ClassWriter extends ClassFile {
             acount++;
         }
         acount += writeJavaAnnotations(sym.getRawAttributes());
+        acount += writeExtraJavaAnnotations(sym.getRawAttributes());
         acount += writeTypeAnnotations(sym.getRawTypeAttributes(), false);
+        acount += writeExtraTypeAnnotations(sym.getRawTypeAttributes());
         return acount;
+    }
+
+    /**Allows subclasses to write additional member attributes
+     *
+     * @return the number of attributes written
+     */
+    protected int writeExtraMemberAttributes(Symbol sym) {
+        return 0;
     }
 
     /**
@@ -445,7 +458,6 @@ public class ClassWriter extends ClassFile {
             for (VarSymbol s : vars) {
                 for (Attribute.Compound a : s.getRawAttributes()) {
                     switch (types.getRetention(a)) {
-                    case SOURCE: break;
                     case CLASS: hasInvisible = true; break;
                     case RUNTIME: hasVisible = true; break;
                     default: // /* fail soft */ throw new AssertionError(vis);
@@ -470,6 +482,13 @@ public class ClassWriter extends ClassFile {
         return attrCount;
     }
 
+    /**Allows subclasses to write additional parameter attributes
+     *
+     * @return the number of attributes written
+     */
+    protected int writeExtraParameterAttributes(MethodSymbol m) {
+        return 0;
+    }
 /**********************************************************************
  * Writing Java-language annotations (aka metadata, attributes)
  **********************************************************************/
@@ -483,7 +502,6 @@ public class ClassWriter extends ClassFile {
         ListBuffer<Attribute.Compound> invisibles = new ListBuffer<>();
         for (Attribute.Compound a : attrs) {
             switch (types.getRetention(a)) {
-            case SOURCE: break;
             case CLASS: invisibles.append(a); break;
             case RUNTIME: visibles.append(a); break;
             default: // /* fail soft */ throw new AssertionError(vis);
@@ -508,6 +526,14 @@ public class ClassWriter extends ClassFile {
             attrCount++;
         }
         return attrCount;
+    }
+
+    /**Allows subclasses to write additional Java-language annotations
+     *
+     * @return the number of JVM attributes written
+     */
+    protected int writeExtraJavaAnnotations(List<Attribute.Compound> attrs) {
+        return 0;
     }
 
     int writeTypeAnnotations(List<Attribute.TypeCompound> typeAnnos, boolean inCode) {
@@ -564,6 +590,14 @@ public class ClassWriter extends ClassFile {
         }
 
         return attrCount;
+    }
+
+    /**Allows subclasses to write additional type annotations
+     *
+     * @return the number of JVM attributes written
+     */
+    protected int writeExtraTypeAnnotations(List<Attribute.TypeCompound> attrs) {
+        return 0;
     }
 
     /** A visitor to write an attribute including its leading
@@ -626,8 +660,13 @@ public class ClassWriter extends ClassFile {
         }
         public void visitArray(Attribute.Array array) {
             databuf.appendByte('[');
-            databuf.appendChar(array.values.length);
+            int count = array.values.length;
             for (Attribute a : array.values) {
+                if (a instanceof Attribute.Error) count--;
+            }
+            databuf.appendChar(count);
+            for (Attribute a : array.values) {
+                if (a instanceof Attribute.Error) continue;
                 a.accept(this);
             }
         }
@@ -644,7 +683,7 @@ public class ClassWriter extends ClassFile {
         }
     }
 
-    void writeTypeAnnotation(Attribute.TypeCompound c) {
+    protected void writeTypeAnnotation(Attribute.TypeCompound c) {
         writePosition(c.position);
         writeCompoundAttribute(c);
     }
@@ -949,7 +988,8 @@ public class ClassWriter extends ClassFile {
             acount++;
         }
         acount += writeMemberAttrs(v, false);
-        acount += writeExtraAttributes(v);
+		acount += writeExtraAttributes(v);
+        acount += writeExtraMemberAttributes(v);
         endAttrs(acountIdx, acount);
     }
 
@@ -970,7 +1010,6 @@ public class ClassWriter extends ClassFile {
         if (m.code != null) {
             int alenIdx = writeAttr(names.Code);
             writeCode(m.code);
-            m.code = null; // to conserve space
             endAttr(alenIdx);
             acount++;
         }
@@ -994,10 +1033,14 @@ public class ClassWriter extends ClassFile {
                 acount += writeMethodParametersAttr(m);
         }
         acount += writeMemberAttrs(m, false);
-        if (!m.isLambdaMethod())
+        acount += writeExtraMemberAttributes(m);
+        if (!m.isLambdaMethod()) {
             acount += writeParameterAttrs(m.params);
-        acount += writeExtraAttributes(m);
+            acount += writeExtraParameterAttributes(m);
+        }
+		acount += writeExtraAttributes(m);
         endAttrs(acountIdx, acount);
+        m.code = null; // to conserve space
     }
 
     /** Write code attribute of method.
@@ -1207,6 +1250,8 @@ public class ClassWriter extends ClassFile {
                 if (debugstackmap) System.out.print("null");
                 databuf.appendByte(5);
                 break;
+            case ERROR:
+                t = syms.objectType;
             case CLASS:
             case ARRAY:
             case TYPEVAR:
@@ -1479,6 +1524,9 @@ public class ClassWriter extends ClassFile {
         } else {
             outLocn = CLASS_OUTPUT;
         }
+        if (outLocn == null) {
+            return null;
+        }
         JavaFileObject outFile
             = fileManager.getJavaFileForOutput(outLocn,
                                                name,
@@ -1607,7 +1655,9 @@ public class ClassWriter extends ClassFile {
 
         acount += writeFlagAttrs(c.flags());
         acount += writeJavaAnnotations(c.getRawAttributes());
+        acount += writeExtraJavaAnnotations(c.getRawAttributes());
         acount += writeTypeAnnotations(c.getRawTypeAttributes(), false);
+        acount += writeExtraTypeAnnotations(c.getRawTypeAttributes());
         acount += writeEnclosingMethodAttribute(c);
         if (c.owner.kind == MDL) {
             acount += writeModuleAttribute(c);

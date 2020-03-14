@@ -473,18 +473,21 @@ public class Gen extends JCTree.Visitor {
         // If there are class initializers, create a <clinit> method
         // that contains them as its body.
         if (clinitCode.length() != 0) {
-            MethodSymbol clinit = new MethodSymbol(
-                STATIC | (c.flags() & STRICTFP),
-                names.clinit,
-                new MethodType(
-                    List.nil(), syms.voidType,
-                    List.nil(), syms.methodClass),
-                c);
-            c.members().enter(clinit);
+            Symbol clinit = c.members().findFirst(names.clinit);
+            if (!(clinit instanceof MethodSymbol)) {
+                clinit = new MethodSymbol(
+                    STATIC | (c.flags() & STRICTFP),
+                    names.clinit,
+                    new MethodType(
+                        List.nil(), syms.voidType,
+                        List.nil(), syms.methodClass),
+                    c);
+                c.members().enter(clinit);
+            }
             List<JCStatement> clinitStats = clinitCode.toList();
             JCBlock block = make.at(clinitStats.head.pos()).Block(0, clinitStats);
             block.endpos = TreeInfo.endPos(clinitStats.last());
-            methodDefs.append(make.MethodDef(clinit, block));
+            methodDefs.append(make.MethodDef((MethodSymbol)clinit, block));
 
             if (!clinitTAs.isEmpty())
                 clinit.appendUniqueTypeAttributes(clinitTAs.toList());
@@ -500,11 +503,12 @@ public class Gen extends JCTree.Visitor {
         ListBuffer<Attribute.TypeCompound> fieldTAs = new ListBuffer<>();
         ListBuffer<Attribute.TypeCompound> nonfieldTAs = new ListBuffer<>();
         for (TypeCompound ta : tas) {
-            Assert.check(ta.getPosition().type != TargetType.UNKNOWN);
-            if (ta.getPosition().type == TargetType.FIELD) {
-                fieldTAs.add(ta);
-            } else {
-                nonfieldTAs.add(ta);
+            if (ta.getPosition() != null && ta.getPosition().type != TargetType.UNKNOWN) {
+                if (ta.getPosition().type == TargetType.FIELD) {
+                    fieldTAs.add(ta);
+                } else {
+                    nonfieldTAs.add(ta);
+                }
             }
         }
         sym.setTypeAttributes(fieldTAs.toList());
@@ -849,7 +853,7 @@ public class Gen extends JCTree.Visitor {
     public Item genExpr(JCTree tree, Type pt) {
         Type prevPt = this.pt;
         try {
-            if (tree.type.constValue() != null) {
+            if (tree.type != null && tree.type.constValue() != null) {
                 // Short circuit any expressions which are constants
                 tree.accept(classReferenceVisitor);
                 checkStringConstant(tree.pos(), tree.type.constValue());
@@ -1939,8 +1943,11 @@ public class Gen extends JCTree.Visitor {
         // Generate code for all arguments, where the expected types are
         // the parameters of the constructor's external type (that is,
         // any implicit outer instance appears as first parameter).
-        genArgs(tree.args, tree.constructor.externalType(types).getParameterTypes());
-
+        try {
+            genArgs(tree.args, tree.constructor.externalType(types).getParameterTypes());
+        } catch (NullPointerException npe) {
+            throw (NullPointerException)new NullPointerException("Issue #246934 - method tree: " + env.enclMethod).initCause(npe);
+        }
         items.makeMemberItem(tree.constructor, true).invoke();
         result = items.makeStackItem(tree.type);
     }

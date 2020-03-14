@@ -35,6 +35,7 @@ import com.sun.tools.javac.code.Types.TypeMapping;
 import com.sun.tools.javac.comp.ArgumentAttr.LocalCacheContext;
 import com.sun.tools.javac.comp.Infer.GraphSolver.InferenceGraph;
 import com.sun.tools.javac.comp.Resolve.ResolveError;
+import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.resources.CompilerProperties.Fragments;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.util.*;
@@ -99,7 +100,8 @@ public class DeferredAttr extends JCTree.Visitor {
     final Flow flow;
     final Names names;
     final TypeEnvs typeEnvs;
-    final DeferredCompletionFailureHandler dcfh;
+    final JavaCompiler compiler;
+	final DeferredCompletionFailureHandler dcfh;
 
     public static DeferredAttr instance(Context context) {
         DeferredAttr instance = context.get(deferredAttrKey);
@@ -126,7 +128,8 @@ public class DeferredAttr extends JCTree.Visitor {
         names = Names.instance(context);
         stuckTree = make.Ident(names.empty).setType(Type.stuckType);
         typeEnvs = TypeEnvs.instance(context);
-        dcfh = DeferredCompletionFailureHandler.instance(context);
+        compiler = JavaCompiler.instance(context);
+        dcfh = DeferredCompletionFailureHandler.instance(context);		
         emptyDeferredAttrContext =
             new DeferredAttrContext(AttrMode.CHECK, null, MethodResolutionPhase.BOX, infer.emptyContext, null, null) {
                 @Override
@@ -494,7 +497,7 @@ public class DeferredAttr extends JCTree.Visitor {
         return attribSpeculative(tree, env, resultInfo, treeCopier,
                 null, AttributionMode.SPECULATIVE, localCache);
     }
-
+	
     <Z> JCTree attribSpeculative(JCTree tree, Env<AttrContext> env, ResultInfo resultInfo, TreeCopier<Z> deferredCopier,
                                  Supplier<DiagnosticHandler> diagHandlerCreator, AttributionMode attributionMode,
                                  LocalCacheContext localCache) {
@@ -509,16 +512,18 @@ public class DeferredAttr extends JCTree.Visitor {
      * outside of the speculatively attributed tree.
      */
     <Z> JCTree attribSpeculative(JCTree tree, Env<AttrContext> env, ResultInfo resultInfo,
-                              Supplier<DiagnosticHandler> diagHandlerCreator, AttributionMode attributionMode,
-                              LocalCacheContext localCache) {
+                                 Supplier<DiagnosticHandler> diagHandlerCreator, AttributionMode attributionMode,
+                                 LocalCacheContext localCache) {
         Env<AttrContext> speculativeEnv = env.dup(tree, env.info.dup(env.info.scope.dupUnshared(env.info.scope.owner)));
         speculativeEnv.info.attributionMode = attributionMode;
         Log.DiagnosticHandler deferredDiagnosticHandler = diagHandlerCreator != null ? diagHandlerCreator.get() : new DeferredAttrDiagHandler(log, tree);
         DeferredCompletionFailureHandler.Handler prevCFHandler = dcfh.setHandler(dcfh.speculativeCodeHandler);
         Queues prevQueues = annotate.setQueues(new Queues());
         int nwarnings = log.nwarnings;
-        log.nwarnings = 0;
+		log.nwarnings = 0;
+        boolean oldSkipAP = compiler.skipAnnotationProcessing;
         try {
+            compiler.skipAnnotationProcessing = true;
             attr.attribTree(tree, speculativeEnv, resultInfo);
             return tree;
         } finally {
@@ -526,6 +531,7 @@ public class DeferredAttr extends JCTree.Visitor {
             dcfh.setHandler(prevCFHandler);
             log.nwarnings += nwarnings;
             enter.unenter(env.toplevel, tree);
+            compiler.skipAnnotationProcessing = oldSkipAP;
             log.popDiagnosticHandler(deferredDiagnosticHandler);
             if (localCache != null) {
                 localCache.leave();
@@ -860,7 +866,7 @@ public class DeferredAttr extends JCTree.Visitor {
                     boolean returnTypeIsVoid = currentReturnType.hasTag(VOID);
                     if (tree.getBodyKind() == BodyKind.EXPRESSION) {
                         boolean isExpressionCompatible = !returnTypeIsVoid ||
-                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody());
+                            TreeInfo.isExpressionStatement((JCExpression)tree.getBody(), names);
                         if (!isExpressionCompatible) {
                             resultInfo.checkContext.report(tree.pos(),
                                 diags.fragment(Fragments.IncompatibleRetTypeInLambda(Fragments.MissingRetVal(currentReturnType))));
@@ -1045,7 +1051,7 @@ public class DeferredAttr extends JCTree.Visitor {
      */
     public class RecoveryDeferredTypeMap extends DeferredTypeMap<Type> {
 
-        public RecoveryDeferredTypeMap(AttrMode mode, Symbol msym, MethodResolutionPhase phase) {
+         public RecoveryDeferredTypeMap(AttrMode mode, Symbol msym, MethodResolutionPhase phase) {
             super(mode, msym, phase != null ? phase : MethodResolutionPhase.BOX);
         }
 

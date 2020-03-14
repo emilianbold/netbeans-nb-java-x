@@ -38,9 +38,8 @@ import javax.tools.JavaFileObject;
 
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.Tree;
-import com.sun.tools.javac.api.BasicJavacTask;
-import com.sun.tools.javac.processing.JavacProcessingEnvironment;
-import com.sun.tools.javac.util.Context;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 
 /**
  * Provides access to functionality specific to the JDK Java Compiler, javac.
@@ -50,24 +49,6 @@ import com.sun.tools.javac.util.Context;
  * @since 1.6
  */
 public abstract class JavacTask implements CompilationTask {
-
-    /**
-     * Returns the {@code JavacTask} for a {@code ProcessingEnvironment}.
-     * If the compiler is being invoked using a
-     * {@link javax.tools.JavaCompiler.CompilationTask CompilationTask},
-     * then that task will be returned.
-     * @param processingEnvironment the processing environment
-     * @return the {@code JavacTask} for a {@code ProcessingEnvironment}
-     * @since 1.8
-     */
-    public static JavacTask instance(ProcessingEnvironment processingEnvironment) {
-        if (!processingEnvironment.getClass().getName().equals(
-                "com.sun.tools.javac.processing.JavacProcessingEnvironment"))
-            throw new IllegalArgumentException();
-        Context c = ((JavacProcessingEnvironment) processingEnvironment).getContext();
-        JavacTask t = c.get(JavacTask.class);
-        return (t != null) ? t : new BasicJavacTask(c, true);
-    }
 
     /**
      * Parses the specified files returning a list of abstract syntax trees.

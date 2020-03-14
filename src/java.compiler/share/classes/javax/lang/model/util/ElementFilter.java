@@ -89,7 +89,7 @@ public class ElementFilter {
 
     @SuppressWarnings("preview")
     private static final Set<ElementKind> RECORD_COMPONENT_KIND =
-        Set.of(ElementKind.RECORD_COMPONENT);
+        Collections.unmodifiableSet(EnumSet.of(ElementKind.RECORD));
 
     /**
      * Returns a list of fields in {@code elements}.

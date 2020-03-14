@@ -53,7 +53,6 @@ public interface CaseTree extends Tree {
      * @return the expression for the case, or null
      * @deprecated Please use {@link #getExpressions()}.
      */
-    @Deprecated
     ExpressionTree getExpression();
 
     /**
@@ -63,6 +62,7 @@ public interface CaseTree extends Tree {
      * @return labels for this case
      * @since 12
      */
+    @Deprecated()
     List<? extends ExpressionTree> getExpressions();
 
     /**
@@ -83,6 +83,7 @@ public interface CaseTree extends Tree {
      * @return case value or null
      * @since 12
      */
+    @Deprecated()
     public default Tree getBody() {
         return null;
     }
@@ -93,6 +94,7 @@ public interface CaseTree extends Tree {
      * @return the kind of this case
      * @since 12
      */
+    @Deprecated()
     public default CaseKind getCaseKind() {
         return CaseKind.STATEMENT;
     }
@@ -106,6 +108,7 @@ public interface CaseTree extends Tree {
      *
      * @since 12
      */
+    @Deprecated()
     public enum CaseKind {
         /**
          * Case is in the form: {@code case <expression>: <statements>}.

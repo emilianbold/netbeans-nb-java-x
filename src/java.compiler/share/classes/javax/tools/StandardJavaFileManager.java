@@ -205,7 +205,7 @@ public interface StandardJavaFileManager extends JavaFileManager {
      */
     default Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths(
             Collection<? extends Path> paths) {
-        return getJavaFileObjectsFromFiles(asFiles(paths));
+        return getJavaFileObjectsFromFiles(Util.asFiles(paths));
     }
 
     /**
@@ -231,10 +231,10 @@ public interface StandardJavaFileManager extends JavaFileManager {
      * {@code Path} and have it be treated as an {@code Iterable} of its
      * components.
      */
-    @Deprecated(since = "13")
+    @Deprecated()
     default Iterable<? extends JavaFileObject> getJavaFileObjectsFromPaths(
             Iterable<? extends Path> paths) {
-        return getJavaFileObjectsFromPaths(asCollection(paths));
+        return getJavaFileObjectsFromPaths(Util.asCollection(paths));
     }
 
     /**
@@ -351,7 +351,7 @@ public interface StandardJavaFileManager extends JavaFileManager {
      */
     default void setLocationFromPaths(Location location, Collection<? extends Path> paths)
             throws IOException {
-        setLocation(location, asFiles(paths));
+        setLocation(location, Util.asFiles(paths));
     }
 
     /**
@@ -420,7 +420,7 @@ public interface StandardJavaFileManager extends JavaFileManager {
      * @since 9
      */
     default Iterable<? extends Path> getLocationAsPaths(Location location) {
-        return asPaths(getLocation(location));
+        return Util.asPaths(getLocation(location));
     }
 
     /**
@@ -478,50 +478,54 @@ public interface StandardJavaFileManager extends JavaFileManager {
       */
     default void setPathFactory(PathFactory f) { }
 
+    class Util {
+        private static Iterable<Path> asPaths(final Iterable<? extends File> files) {
+            return () -> new Iterator<Path>() {
+                Iterator<? extends File> iter = files.iterator();
 
-    private static Iterable<Path> asPaths(final Iterable<? extends File> files) {
-        return () -> new Iterator<Path>() {
-            Iterator<? extends File> iter = files.iterator();
-
-            @Override
-            public boolean hasNext() {
-                return iter.hasNext();
-            }
-
-            @Override
-            public Path next() {
-                return iter.next().toPath();
-            }
-        };
-    }
-
-    private static Iterable<File> asFiles(final Iterable<? extends Path> paths) {
-        return () -> new Iterator<File>() {
-            Iterator<? extends Path> iter = paths.iterator();
-
-            @Override
-            public boolean hasNext() {
-                return iter.hasNext();
-            }
-
-            @Override
-            public File next() {
-                Path p = iter.next();
-                try {
-                    return p.toFile();
-                } catch (UnsupportedOperationException e) {
-                    throw new IllegalArgumentException(p.toString(), e);
+                @Override
+                public boolean hasNext() {
+                    return iter.hasNext();
                 }
-            }
-        };
-    }
 
-    private static <T> Collection<T> asCollection(Iterable<T> iterable) {
-        if (iterable instanceof Collection) {
-            return (Collection<T>) iterable;
+                @Override
+                public Path next() {
+                    return iter.next().toPath();
+                }
+            };
         }
-        List<T> result = new ArrayList<>();
-        for (T item : iterable) result.add(item);
-        return result;
+
+        private static Iterable<File> asFiles(final Iterable<? extends Path> paths) {
+            return () -> new Iterator<File>() {
+                Iterator<? extends Path> iter = paths.iterator();
+
+                @Override
+                public boolean hasNext() {
+                    return iter.hasNext();
+                }
+
+                @Override
+                public File next() {
+                    Path p = iter.next();
+                    try {
+                        return p.toFile();
+                    } catch (UnsupportedOperationException e) {
+                        throw new IllegalArgumentException(p.toString(), e);
+                    }
+                }
+            };
+        }
+         
+        private static <T> Collection<T> asCollection(Iterable<T> iterable) {
+            if (iterable instanceof Collection) {
+                return (Collection<T>) iterable;
+            }
+            List<T> result = new ArrayList<>();
+            for (T item : iterable) {
+                result.add(item);
+            }
+            return result;
+        }
     }
 }
+    

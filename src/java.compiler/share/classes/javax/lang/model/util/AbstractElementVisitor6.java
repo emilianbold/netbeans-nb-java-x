@@ -76,7 +76,7 @@ public abstract class AbstractElementVisitor6<R, P> implements ElementVisitor<R,
      * @deprecated Release 6 is obsolete; update to a visitor for a newer
      * release level.
      */
-    @Deprecated(since="9")
+    @Deprecated()
     protected AbstractElementVisitor6(){}
 
     /**

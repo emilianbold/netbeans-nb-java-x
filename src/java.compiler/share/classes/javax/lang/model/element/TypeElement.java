@@ -25,6 +25,7 @@
 
 package javax.lang.model.element;
 
+import java.util.Collections;
 import java.util.List;
 import javax.lang.model.type.*;
 import javax.lang.model.util.*;
@@ -201,7 +202,7 @@ public interface TypeElement extends Element, Parameterizable, QualifiedNameable
                                  essentialAPI=false)
     @SuppressWarnings("preview")
     default List<? extends RecordComponentElement> getRecordComponents() {
-        return List.of();
+        return Collections.emptyList();
     }
 
     /**

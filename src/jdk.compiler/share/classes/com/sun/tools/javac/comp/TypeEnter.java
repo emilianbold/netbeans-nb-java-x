@@ -61,6 +61,7 @@ import static com.sun.tools.javac.code.TypeTag.BOT;
 import static com.sun.tools.javac.tree.JCTree.Tag.*;
 
 import com.sun.tools.javac.util.Dependencies.CompletionCause;
+import com.sun.tools.javac.parser.Tokens.Comment;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticFlag;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 
@@ -113,6 +114,9 @@ public class TypeEnter implements Completer {
     private final Lint lint;
     private final TypeEnvs typeEnvs;
     private final Dependencies dependencies;
+    private final DeferredCompletionFailureHandler dcfh;
+    private final JavacMessages messages;
+    private final boolean ignoreNoLang;
 
     public static TypeEnter instance(Context context) {
         TypeEnter instance = context.get(typeEnterKey);
@@ -143,6 +147,12 @@ public class TypeEnter implements Completer {
         Source source = Source.instance(context);
         allowTypeAnnos = Feature.TYPE_ANNOTATIONS.allowedInSource(source);
         allowDeprecationOnImport = Feature.DEPRECATION_ON_IMPORT.allowedInSource(source);
+        Options options = Options.instance(context);
+        boolean ideMode = options.get("ide") != null;
+        boolean backgroundCompilation = options.get("backgroundCompilation") != null;
+        ignoreNoLang = ideMode && !backgroundCompilation;
+        dcfh = DeferredCompletionFailureHandler.instance(context);
+        messages = JavacMessages.instance(context);
     }
 
     /** Switch: support type annotations.
@@ -168,7 +178,13 @@ public class TypeEnter implements Completer {
         for (JCCompilationUnit tree : trees) {
             if (!tree.starImportScope.isFilled()) {
                 Env<AttrContext> topEnv = enter.topLevelEnv(tree);
-                finishImports(tree, () -> { completeClass.resolveImports(tree, topEnv); });
+                finishImports(tree, () -> {
+                    try {
+                        completeClass.resolveImports(tree, topEnv);
+                    } catch (CompletionFailure ex) {
+                        chk.completionError(tree.pos(), ex);
+                    }
+                });
             }
         }
     }
@@ -284,7 +300,12 @@ public class TypeEnter implements Completer {
                     dependencies.push(env.enclClass.sym, phaseName);
                     runPhase(env);
                 } catch (CompletionFailure ex) {
-                    chk.completionError(tree.pos(), ex);
+                    if (ex.sym.kind != PCK || !names.java_lang.contentEquals(((PackageSymbol)ex.sym).fullname)) {
+                        chk.completionError(tree.pos(), ex);
+                    }
+                } catch (Attr.BreakAttr br) {
+                    queue.clear();
+                    throw br;
                 } finally {
                     dependencies.pop();
                     deferredLintHandler.setPos(prevLintPos);
@@ -322,6 +343,9 @@ public class TypeEnter implements Completer {
             // clauses in its source file have been seen.
             if (sym.owner.kind == PCK) {
                 resolveImports(env.toplevel, env.enclosing(TOPLEVEL));
+//                if ((sym.flags_field & APT_CLEANED) != 0) {
+//                    todo.remove(sym);
+//                }
                 todo.append(env);
             }
 
@@ -353,8 +377,17 @@ public class TypeEnter implements Completer {
 
                 // Import-on-demand java.lang.
                 PackageSymbol javaLang = syms.enterPackage(syms.java_base, names.java_lang);
-                if (javaLang.members().isEmpty() && !javaLang.exists())
-                    throw new FatalError(diags.fragment(Fragments.FatalErrNoJavaLang));
+                if (javaLang.members().isEmpty() && !javaLang.exists() || syms.java_base.kind == ERR) {
+                    JCDiagnostic msg = diags.fragment(Fragments.FatalErrNoJavaLang);
+                    if (ignoreNoLang) {
+                        throw new CompletionFailure(javaLang, () -> {
+                            return msg;
+                        }, dcfh);
+                    }
+                    else {
+                        throw new MissingPlatformError (msg);
+                    }
+                }
                 importAll(make.at(tree.pos()).Import(make.QualIdent(javaLang), false), javaLang, env);
 
                 JCModuleDecl decl = tree.getModuleDecl();
@@ -502,7 +535,7 @@ public class TypeEnter implements Completer {
          *                  scope to add to.
          */
         private void importNamed(DiagnosticPosition pos, final Symbol tsym, Env<AttrContext> env, JCImport imp) {
-            if (tsym.kind == TYP)
+            if (tsym.kind == TYP || tsym.kind == ERR)
                 imp.importScope = env.toplevel.namedImportScope.importType(tsym.owner.members(), tsym.owner.members(), tsym);
         }
 
@@ -514,28 +547,6 @@ public class TypeEnter implements Completer {
 
         public AbstractHeaderPhase(CompletionCause phaseName, Phase next) {
             super(phaseName, next);
-        }
-
-        protected Env<AttrContext> baseEnv(JCClassDecl tree, Env<AttrContext> env) {
-            WriteableScope baseScope = WriteableScope.create(tree.sym);
-            //import already entered local classes into base scope
-            for (Symbol sym : env.outer.info.scope.getSymbols(NON_RECURSIVE)) {
-                if (sym.isLocal()) {
-                    baseScope.enter(sym);
-                }
-            }
-            //import current type-parameters into base scope
-            if (tree.typarams != null)
-                for (List<JCTypeParameter> typarams = tree.typarams;
-                     typarams.nonEmpty();
-                     typarams = typarams.tail)
-                    baseScope.enter(typarams.head.type.tsym);
-            Env<AttrContext> outer = env.outer; // the base clause can't see members of this class
-            Env<AttrContext> localEnv = outer.dup(tree, outer.info.dup(baseScope));
-            localEnv.baseClause = true;
-            localEnv.outer = outer;
-            localEnv.info.isSelfCall = false;
-            return localEnv;
         }
 
         /** Generate a base clause for an enum type.
@@ -550,7 +561,7 @@ public class TypeEnter implements Completer {
         }
 
         protected Type modelMissingTypes(Env<AttrContext> env, Type t, final JCExpression tree, final boolean interfaceExpected) {
-            if (!t.hasTag(ERROR))
+            if (!t.hasTag(ERROR) || tree == null)
                 return t;
 
             return new ErrorType(t.getOriginalType(), t.tsym) {
@@ -597,7 +608,7 @@ public class TypeEnter implements Completer {
 
                 @Override
                 public void visitIdent(JCIdent tree) {
-                    if (!tree.type.hasTag(ERROR)) {
+                    if (tree.type != null && !tree.type.hasTag(ERROR)) {
                         result = tree.type;
                     } else {
                         result = synthesizeClass(tree.name, msym.unnamedPackage).type;
@@ -887,6 +898,9 @@ public class TypeEnter implements Completer {
 
         void enterThisAndSuper(ClassSymbol sym, Env<AttrContext> env) {
             ClassType ct = (ClassType)sym.type;
+
+
+
             // enter symbols for 'this' into current scope.
             VarSymbol thisSym =
                     new VarSymbol(FINAL | HASINIT, names._this, sym.type, sym);
@@ -1006,9 +1020,13 @@ public class TypeEnter implements Completer {
          */
         void finishClass(JCClassDecl tree, Env<AttrContext> env) {
             if ((tree.mods.flags & Flags.ENUM) != 0 &&
-                !tree.sym.type.hasTag(ERROR) &&
-                (types.supertype(tree.sym.type).tsym.flags() & Flags.ENUM) == 0) {
-                addEnumMembers(tree, env);
+                !tree.sym.type.hasTag(ERROR)) {
+                Type supertype = types.supertype(tree.sym.type);
+                if (supertype != null && !supertype.hasTag(TypeTag.NONE)
+                        && (supertype.tsym.flags() & Flags.ENUM) == 0
+                        && (tree.sym.flags_field & Flags.FROMCLASS) == 0) {
+                        addEnumMembers(tree, env);
+                }
             }
             boolean isRecord = (tree.sym.flags_field & RECORD) != 0;
             List<JCTree> alreadyEntered = null;
@@ -1028,6 +1046,9 @@ public class TypeEnter implements Completer {
             }
             if (tree.sym.isAnnotationType()) {
                 Assert.check(tree.sym.isCompleted());
+                if ((tree.sym.flags_field & FROMCLASS) != 0) {
+                    tree.sym.clearAnnotationTypeMetadata();
+                }
                 tree.sym.setAnnotationTypeMetadata(new AnnotationTypeMetadata(tree.sym, annotate.annotationTypeSourceCompleter()));
             }
         }
@@ -1061,7 +1082,8 @@ public class TypeEnter implements Completer {
         private void addEnumMembers(JCClassDecl tree, Env<AttrContext> env) {
             JCExpression valuesType = make.Type(new ArrayType(tree.sym.type, syms.arrayClass));
 
-            JCMethodDecl values = make.
+            // public static T[] values() { return ???; }
+            JCMethodDecl values = make.at(Position.NOPOS).
                 MethodDef(make.Modifiers(Flags.PUBLIC|Flags.STATIC),
                           names.values,
                           valuesType,
@@ -1070,6 +1092,27 @@ public class TypeEnter implements Completer {
                           List.nil(),
                           null,
                           null);
+            class HardcodedComment implements Comment {
+                private final String key;
+                public HardcodedComment(String key) {
+                    this.key = key;
+                }
+                public String getText() {
+                    return messages.getLocalizedString(key); //NOI18N
+                }
+                public int getSourcePos(int index) {
+                    return -1;
+                }
+                public CommentStyle getStyle() {
+                    return CommentStyle.JAVADOC;
+                }
+                public boolean isDeprecated() {
+                    return false;
+                }
+            }
+            DocCommentTable docComments = env.toplevel.docComments;
+            if (docComments != null)
+                docComments.putComment(values, new HardcodedComment("compiler.javadoc.enum.values")); //NOI18N
             memberEnter.memberEnter(values, env);
 
             JCMethodDecl valueOf = make.
@@ -1084,6 +1127,8 @@ public class TypeEnter implements Completer {
                           List.nil(),
                           null,
                           null);
+            if (docComments != null)
+                docComments.putComment(valueOf, new HardcodedComment("compiler.javadoc.enum.valueOf")); //NOI18N
             memberEnter.memberEnter(valueOf, env);
         }
 
@@ -1164,6 +1209,35 @@ public class TypeEnter implements Completer {
         }
     }
 
+    Env<AttrContext> baseEnv(JCClassDecl tree, Env<AttrContext> env) {
+        WriteableScope baseScope = WriteableScope.create(tree.sym);
+        //import already entered local classes into base scope
+        for (Symbol sym : env.outer.info.scope.getSymbols(NON_RECURSIVE)) {
+            if (sym.isLocal()) {
+                baseScope.enter(sym);
+            }
+        }
+        //import current type-parameters into base scope
+        if (tree.typarams != null)
+            for (List<JCTypeParameter> typarams = tree.typarams;
+                 typarams.nonEmpty();
+                 typarams = typarams.tail)
+                baseScope.enter(typarams.head.type.tsym);
+        Env<AttrContext> outer = env.outer; // the base clause can't see members of this class
+        Env<AttrContext> localEnv = outer.dup(tree, outer.info.dup(baseScope));
+        localEnv.baseClause = true;
+        localEnv.outer = outer;
+        localEnv.info.isSelfCall = false;
+        return localEnv;
+    }
+
+    public Env<AttrContext> getBaseEnv(JCClassDecl tree, Env<AttrContext> env) {
+        if (tree.sym == null)
+            return null;
+        Env<AttrContext> bEnv = baseEnv(tree, env);
+        return bEnv;
+    }
+
     private MethodSymbol lookupMethod(TypeSymbol tsym, Name name, List<Type> argtypes) {
         for (Symbol s : tsym.members().getSymbolsByName(name, s -> s.kind == MTH)) {
             if (types.isSameTypes(s.type.getParameterTypes(), argtypes)) {
@@ -1199,7 +1273,7 @@ public class TypeEnter implements Completer {
         @Override
         public Type constructorType() {
             if (constructorType == null) {
-                constructorType = new MethodType(List.nil(), syms.voidType, List.nil(), syms.methodClass);
+                constructorType = new MethodType(List.nil(), null, List.nil(), syms.methodClass);
             }
             return constructorType;
         }
@@ -1320,8 +1394,8 @@ public class TypeEnter implements Completer {
             }
             return constructorType;
         }
-
-        @Override
+		
+       @Override
         public MethodSymbol constructorSymbol() {
             MethodSymbol csym = super.constructorSymbol();
             /* if we have to generate a default constructor for records we will treat it as the compact one
@@ -1357,21 +1431,50 @@ public class TypeEnter implements Completer {
         MethodSymbol initSym = helper.constructorSymbol();
         ListBuffer<JCStatement> stats = new ListBuffer<>();
         if (helper.owner().type != syms.objectType) {
-            JCExpression meth;
-            if (!helper.enclosingType().hasTag(NONE)) {
-                meth = make.Select(make.Ident(initSym.params.head), names._super);
-            } else {
-                meth = make.Ident(names._super);
-            }
+        JCExpression meth;
+        if (!helper.enclosingType().hasTag(NONE)) {
+        	meth = make.Select(make.Ident(initSym.params.head), names._super);
+        } else {
+            meth = make.Ident(names._super);
+        }
             List<JCExpression> typeargs = initType.getTypeArguments().nonEmpty() ?
                     make.Types(initType.getTypeArguments()) : null;
             JCStatement superCall = make.Exec(make.Apply(typeargs, meth, helper.superArgs().map(make::Ident)));
             stats.add(superCall);
-        }
+    }
         JCMethodDecl result = make.MethodDef(initSym, make.Block(0, stats.toList()));
         return helper.finalAdjustment(result);
     }
-
+/** Generate call to superclass constructor. This is:
+     *
+     *    super(id_0, ..., id_n)
+     *
+     * or, if based == true
+     *
+     *    id_0.super(id_1,...,id_n)
+     *
+     *  where id_0, ..., id_n are the names of the given parameters.
+     *
+     *  @param make    The tree factory
+     *  @param params  The parameters that need to be passed to super
+     *  @param typarams  The type parameters that need to be passed to super
+     *  @param based   Is first parameter a this$n?
+     */
+    public JCExpressionStatement SuperCall(TreeMaker make,
+                   List<Type> typarams,
+                   List<JCVariableDecl> params,
+                   boolean based) {
+        JCExpression meth;
+        if (based) {
+            meth = make.Select(make.Ident(params.head), names._super);
+            params = params.tail;
+        } else {
+            meth = make.Ident(names._super);
+        }
+        List<JCExpression> typeargs = typarams.nonEmpty() ? make.Types(typarams) : null;
+        return make.Exec(make.Apply(typeargs, meth, make.Idents(params)));
+    }
+    
     /**
      * Mark sym deprecated if annotations contain @Deprecated annotation.
      */

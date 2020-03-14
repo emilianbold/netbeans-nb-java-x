@@ -25,6 +25,7 @@
 
 package com.sun.tools.javac.code;
 
+import com.sun.source.tree.ExpressionTree;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -68,6 +69,8 @@ import com.sun.tools.javac.util.Names;
 import static com.sun.tools.javac.code.Flags.*;
 import static com.sun.tools.javac.code.Kinds.Kind.*;
 import static com.sun.tools.javac.code.TypeTag.*;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 
 /** A class that defines all predefined constants and operators
  *  as well as special classes such as java.lang.Object, which need
@@ -439,6 +442,9 @@ public class Symtab {
             public <R, P> R accept(ElementVisitor<R, P> v, P p) {
                 return v.visitUnknown(this, p);
             }
+            public boolean hasOuterInstance() {
+                return false;
+            }
         };
 
         // create the error symbols
@@ -655,6 +661,27 @@ public class Symtab {
         return c;
     }
 
+    public ClassSymbol enterClass(ModuleSymbol msym, Name flatname, Name name, Symbol owner) {
+        Assert.checkNonNull(msym);
+        ClassSymbol c = getClass(msym, flatname);
+        if (c == null) {
+            c = defineClass(name, owner);
+            c.flatname = flatname;
+            doEnterClass(msym, c);
+        } else if ((c.name != name || c.owner != owner) && c.owner.kind.matches(Kinds.KindSelector.TYP_PCK)) {
+            // reassign fields of classes that might have been loaded with
+            // their flat names.
+            c.owner.members().remove(c);
+            c.name = name;
+            c.owner = owner;
+            c.fullname = ClassSymbol.formFullName(name, owner);
+            if (c.type != null && c.type.hasTag(CLASS)) {
+                ((ClassType)c.type).setEnclosingType(Type.noType);
+            }
+        }
+        return c;
+    }
+
     public ClassSymbol getClass(ModuleSymbol msym, Name flatName) {
         Assert.checkNonNull(msym, flatName::toString);
         return classes.getOrDefault(flatName, Collections.emptyMap()).get(msym);
@@ -739,6 +766,8 @@ public class Symtab {
      */
     public ClassSymbol enterClass(ModuleSymbol msym, Name flatname) {
         Assert.checkNonNull(msym);
+        if (flatname == null)
+            flatname = names.empty;
         PackageSymbol ps = lookupPackage(msym, Convert.packagePart(flatname));
         Assert.checkNonNull(ps);
         Assert.checkNonNull(ps.modle);

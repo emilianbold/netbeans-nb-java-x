@@ -89,7 +89,6 @@ import com.sun.tools.javac.util.JavacMessages;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.Log;
 import com.sun.tools.javac.util.MatchingUtils;
-import com.sun.tools.javac.util.ModuleHelper;
 import com.sun.tools.javac.util.Name;
 import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Options;
@@ -99,6 +98,8 @@ import static com.sun.tools.javac.code.Kinds.Kind.*;
 import com.sun.tools.javac.comp.Annotate;
 import static com.sun.tools.javac.comp.CompileStates.CompileState;
 import static com.sun.tools.javac.util.JCDiagnostic.DiagnosticFlag.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Objects of this class hold and manage the state needed to support
@@ -110,6 +111,9 @@ import static com.sun.tools.javac.util.JCDiagnostic.DiagnosticFlag.*;
  * deletion without notice.</b>
  */
 public class JavacProcessingEnvironment implements ProcessingEnvironment, Closeable {
+
+    private static final Logger LOGGER = Logger.getLogger(JavacProcessingEnvironment.class.getName());
+
     private final Options options;
 
     private final boolean printProcessorInfo;
@@ -187,6 +191,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
     private final Check chk;
 
     private final Context context;
+    private boolean isBackgroundCompilation;
 
     /**
      * Support for preview language features.
@@ -234,6 +239,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         processorOptions = initProcessorOptions();
         unmatchedProcessorOptions = initUnmatchedProcessorOptions();
         messages = JavacMessages.instance(context);
+        isBackgroundCompilation = options.get("backgroundCompilation") != null;     //NOI18N
         taskListener = MultiTaskListener.instance(context);
         symtab = Symtab.instance(context);
         dcfh = DeferredCompletionFailureHandler.instance(context);
@@ -253,20 +259,21 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
     private Set<String> initPlatformAnnotations() {
         final String module_prefix =
             Feature.MODULES.allowedInSource(source) ? "java.base/" : "";
-        return Set.of(module_prefix + "java.lang.Deprecated",
-                      module_prefix + "java.lang.FunctionalInterface",
-                      module_prefix + "java.lang.Override",
-                      module_prefix + "java.lang.SafeVarargs",
-                      module_prefix + "java.lang.SuppressWarnings",
+        Set<String> ret = new HashSet<>();
+        ret.add(module_prefix + "java.lang.Deprecated");
+        ret.add(module_prefix + "java.lang.FunctionalInterface");
+        ret.add(module_prefix + "java.lang.Override");
+        ret.add(module_prefix + "java.lang.SafeVarargs");
+        ret.add(module_prefix + "java.lang.SuppressWarnings");
 
-                      module_prefix + "java.lang.annotation.Documented",
-                      module_prefix + "java.lang.annotation.Inherited",
-                      module_prefix + "java.lang.annotation.Native",
-                      module_prefix + "java.lang.annotation.Repeatable",
-                      module_prefix + "java.lang.annotation.Retention",
-                      module_prefix + "java.lang.annotation.Target",
-
-                      module_prefix + "java.io.Serial");
+        ret.add(module_prefix + "java.lang.annotation.Documented");
+        ret.add(module_prefix + "java.lang.annotation.Inherited");
+        ret.add(module_prefix + "java.lang.annotation.Native");
+        ret.add(module_prefix + "java.lang.annotation.Repeatable");
+        ret.add(module_prefix + "java.lang.annotation.Retention");
+        ret.add(module_prefix + "java.lang.annotation.Target");
+        ret.add(module_prefix + "java.io.Serial");
+        return ret;
     }
 
     private void initProcessorLoader() {
@@ -282,9 +289,6 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                 processorClassLoader = fileManager.hasLocation(ANNOTATION_PROCESSOR_PATH)
                     ? fileManager.getClassLoader(ANNOTATION_PROCESSOR_PATH)
                     : fileManager.getClassLoader(CLASS_PATH);
-
-                if (options.isSet("accessInternalAPI"))
-                    ModuleHelper.addExports(getClass().getModule(), processorClassLoader.getUnnamedModule());
 
                 if (processorClassLoader != null && processorClassLoader instanceof Closeable) {
                     compiler.closeables = compiler.closeables.prepend((Closeable) processorClassLoader);
@@ -688,6 +692,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
     static class ProcessorState {
         public Processor processor;
         public boolean   contributed;
+        public boolean   invalid;
         private Set<String> supportedAnnotationStrings; // Used for warning generation
         private Set<Pattern> supportedAnnotationPatterns;
         private Set<String> supportedOptionNames;
@@ -744,11 +749,14 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                         }
                     }
                 }
-
+                invalid = false;
             } catch (ClientCodeException e) {
+                invalid = true;
                 throw e;
             } catch (Throwable t) {
-                throw new AnnotationProcessingError(t);
+                rethrowAbort(t);
+                LOGGER.log(Level.INFO, "Annotation processing error:", t);
+                invalid = true;
             } finally {
                 dcfh.setHandler(prevDeferredHandler);
             }
@@ -812,7 +820,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
             ProcessorStateIterator(DiscoveredProcessors psi) {
                 this.psi = psi;
-                this.innerIter = psi.procStateList.iterator();
+                this.innerIter = new ArrayList<ProcessorState>(psi.procStateList).iterator();
                 this.onProcInterator = false;
             }
 
@@ -857,7 +865,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                     Set<TypeElement> emptyTypeElements = Collections.emptySet();
                     while(innerIter.hasNext()) {
                         ProcessorState ps = innerIter.next();
-                        if (ps.contributed)
+                        if (!ps.invalid && ps.contributed)
                             callProcessor(ps.processor, emptyTypeElements, re);
                     }
                 }
@@ -924,6 +932,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
         while(unmatchedAnnotations.size() > 0 && psi.hasNext() ) {
             ProcessorState ps = psi.next();
+            if (ps.invalid) continue;
             Set<String>  matchedNames = new HashSet<>();
             Set<TypeElement> typeElements = new LinkedHashSet<>();
 
@@ -975,7 +984,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
      */
     @SuppressWarnings("preview")
     public static class ComputeAnnotationSet extends
-        ElementScanner14<Set<TypeElement>, Set<TypeElement>> {
+        ElementScanner9<Set<TypeElement>, Set<TypeElement>> {
         final Elements elements;
 
         public ComputeAnnotationSet(Elements elements) {
@@ -1006,9 +1015,23 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         void addAnnotations(Element e, Set<TypeElement> p) {
             for (AnnotationMirror annotationMirror :
                      elements.getAllAnnotationMirrors(e) ) {
-                Element e2 = annotationMirror.getAnnotationType().asElement();
-                p.add((TypeElement) e2);
+                if (isComplete(annotationMirror)) {
+                    Element e2 = annotationMirror.getAnnotationType().asElement();
+                    p.add((TypeElement) e2);
+                }
             }
+        }
+
+
+        private boolean isComplete(AnnotationMirror annotationMirror) {
+            Map<? extends ExecutableElement, ? extends AnnotationValue> elementValues = annotationMirror.getElementValues();
+            for (Element element : annotationMirror.getAnnotationType().asElement().getEnclosedElements()) {
+                if (element.getKind() == ElementKind.METHOD) {
+                    if (!elementValues.containsKey(element) && ((ExecutableElement)element).getDefaultValue() == null)
+                        return false;
+                }
+            }
+            return true;
         }
 
         @Override @DefinedBy(Api.LANGUAGE_MODEL)
@@ -1022,6 +1045,8 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                                          Set<? extends TypeElement> tes,
                                          RoundEnvironment renv) {
         Handler prevDeferredHandler = dcfh.setHandler(dcfh.userCodeHandler);
+        ClassLoader origContextCL = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(proc.getClass().getClassLoader());
         try {
             return proc.process(tes, renv);
         } catch (ClassFinder.BadClassFile ex) {
@@ -1035,8 +1060,11 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         } catch (ClientCodeException e) {
             throw e;
         } catch (Throwable t) {
-            throw new AnnotationProcessingError(t);
+            rethrowAbort(t);
+            LOGGER.log(Level.INFO, "Annotation processing error:", t);
+            return false;
         } finally {
+            Thread.currentThread().setContextClassLoader(origContextCL);
             dcfh.setHandler(prevDeferredHandler);
         }
     }
@@ -1119,6 +1147,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
             //recoverable errors related to the type declared in the generated files:
             List<JCCompilationUnit> parsedFiles = compiler.parseFiles(newSourceFiles, true);
             roots = prev.roots.appendList(parsedFiles);
+            treesToClean.addAll(parsedFiles);
 
             // Check for errors after parsing
             if (unrecoverableError()) {
@@ -1313,45 +1342,16 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
          * asks selected services to prepare to a new round of annotation processing.
          */
         private void newRound() {
-            //ensure treesToClean contains all trees, including implicitly parsed ones
-            for (Env<AttrContext> env : enter.getEnvs()) {
-                treesToClean.add(env.toplevel);
-            }
             for (JCCompilationUnit node : treesToClean) {
                 treeCleaner.scan(node);
             }
-            chk.newRound();
-            enter.newRound();
             filer.newRound();
             messager.newRound();
-            compiler.newRound();
+            compiler.newRound(treesToClean);
             modules.newRound();
             types.newRound();
             annotate.newRound();
             elementUtils.newRound();
-
-            boolean foundError = false;
-
-            for (ClassSymbol cs : symtab.getAllClasses()) {
-                if (cs.kind == ERR) {
-                    foundError = true;
-                    break;
-                }
-            }
-
-            if (foundError) {
-                for (ClassSymbol cs : symtab.getAllClasses()) {
-                    if (cs.classfile != null || cs.kind == ERR) {
-                        cs.reset();
-                        if (cs.kind == ERR) {
-                            cs.type = new ClassType(cs.type.getEnclosingType(), null, cs);
-                        }
-                        if (cs.isCompleted()) {
-                            cs.completer = initialCompleter;
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1365,10 +1365,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         final Set<JCCompilationUnit> treesToClean =
                 Collections.newSetFromMap(new IdentityHashMap<JCCompilationUnit, Boolean>());
 
-        //fill already attributed implicit trees:
-        for (Env<AttrContext> env : enter.getEnvs()) {
-            treesToClean.add(env.toplevel);
-        }
+        treesToClean.addAll(roots);
 
         Set<PackageSymbol> specifiedPackages = new LinkedHashSet<>();
         for (PackageSymbol psym : pckSymbols)
@@ -1395,6 +1392,8 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
             round = round.next(
                     new LinkedHashSet<>(filer.getGeneratedSourceFileObjects()),
                     new LinkedHashMap<>(filer.getGeneratedClasses()));
+
+            roots = round.roots;
 
              // Check for errors during setup.
             if (round.unrecoverableError())
@@ -1426,9 +1425,6 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
         Set<JavaFileObject> newSourceFiles =
                 new LinkedHashSet<>(filer.getGeneratedSourceFileObjects());
-        roots = round.roots;
-
-        errorStatus = errorStatus || (compiler.errorCount() > 0);
 
         round.finalCompiler();
 
@@ -1437,14 +1433,17 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
         errorStatus = errorStatus || (compiler.errorCount() > 0);
 
-        // Free resources
-        this.close();
-
         if (errorStatus && compiler.errorCount() == 0) {
             compiler.log.nerrors++;
         }
 
-        compiler.enterTreesIfNeeded(roots);
+        try {
+            compiler.enterTreesIfNeeded(roots);
+        } catch (Throwable t) {
+            rethrowAbort(t);
+            LOGGER.log(Level.INFO, "Error while re-entering:", t);
+            throw new Abort(t);
+        }
 
         if (!taskListener.isEmpty())
             taskListener.finished(new TaskEvent(TaskEvent.Kind.ANNOTATION_PROCESSING));
@@ -1474,7 +1473,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
             for (JCTree node : unit.defs) {
                 if (node.hasTag(JCTree.Tag.CLASSDEF)) {
                     ClassSymbol sym = ((JCClassDecl) node).sym;
-                    Assert.checkNonNull(sym);
+                    Assert.checkNonNull(sym, () -> "Null sym in class: " + node);
                     classes = classes.prepend(sym);
                 }
             }
@@ -1589,6 +1588,45 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
         }
     }
 
+    private class AnnotationCollector extends TreeScanner {
+        List<JCTree> path = List.nil();
+        static final boolean verbose = false;
+        List<JCAnnotation> annotations = List.nil();
+
+        public List<JCAnnotation> findAnnotations(List<? extends JCTree> nodes) {
+            annotations = List.nil();
+            scan(nodes);
+            List<JCAnnotation> found = annotations;
+            annotations = List.nil();
+            return found.reverse();
+        }
+
+        public void scan(JCTree node) {
+            if (node == null)
+                return;
+            Symbol sym = TreeInfo.symbolFor(node);
+            if (sym != null)
+                path = path.prepend(node);
+            super.scan(node);
+            if (sym != null)
+                path = path.tail;
+        }
+
+        public void visitAnnotation(JCAnnotation node) {
+            annotations = annotations.prepend(node);
+            if (verbose) {
+                StringBuilder sb = new StringBuilder();
+                for (JCTree tree : path.reverse()) {
+                    System.err.print(sb);
+                    System.err.println(TreeInfo.symbolFor(tree));
+                    sb.append("  ");
+                }
+                System.err.print(sb);
+                System.err.println(node);
+            }
+        }
+    }
+
     private final TreeScanner treeCleaner = new TreeScanner() {
             public void scan(JCTree node) {
                 super.scan(node);
@@ -1598,18 +1636,25 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
             JCCompilationUnit topLevel;
             public void visitTopLevel(JCCompilationUnit node) {
                 if (node.packge != null) {
+                    if (node.getPackageAnnotations().nonEmpty())
+                        node.packge.flags_field |= Flags.APT_CLEANED;
                     if (isPkgInfo(node.sourcefile, Kind.SOURCE)) {
                         node.packge.package_info.reset();
                     }
                     node.packge.reset();
                 }
-                if (isModuleInfo(node.sourcefile, Kind.SOURCE)) {
+                if (isModuleInfo(node.sourcefile, Kind.SOURCE) && node.getModuleDecl() != null) {
                     node.modle.reset();
                     node.modle.completer = sym -> modules.enter(List.of(node), node.modle.module_info);
-                    node.modle.module_info.reset();
-                    node.modle.module_info.members_field = WriteableScope.create(node.modle.module_info);
+                    if (node.modle.module_info != null) {
+                        node.modle.module_info.reset();
+                        node.modle.module_info.members_field = WriteableScope.create(node.modle.module_info);
+                    }
                 }
                 node.packge = null;
+                node.namedImportScope = null;
+                node.starImportScope = null;
+                node.toplevelScope = null;
                 topLevel = node;
                 try {
                     super.visitTopLevel(node);
@@ -1636,7 +1681,34 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                     node.defs = defs;
                 }
                 if (node.sym != null) {
-                    node.sym.completer = new ImplicitCompleter(topLevel);
+                    new ElementScanner6<Void, Void>() {
+                        @Override
+                        public Void visitType(TypeElement e, Void p) {
+                            if (e instanceof ClassSymbol) {
+                                ((ClassSymbol) e).flags_field |= (Flags.APT_CLEANED | Flags.FROMCLASS);
+                                ((ClassSymbol) e).clearAnnotationMetadata();
+                            }
+                            return ((Symbol)e).completer.isTerminal() ? super.visitType(e, p) : null;
+                        }
+                        @Override
+                        public Void visitExecutable(ExecutableElement e, Void p) {
+                            if (e instanceof MethodSymbol) {
+                                ((MethodSymbol) e).flags_field |= (Flags.APT_CLEANED | Flags.FROMCLASS);
+                                ((MethodSymbol) e).clearAnnotationMetadata();
+                            }
+                            return null;
+                        }
+                        @Override
+                        public Void visitVariable(VariableElement e, Void p) {
+                            if (e.getKind().isField() && e instanceof VarSymbol) {
+                                ((VarSymbol) e).flags_field |= (Flags.APT_CLEANED | Flags.FROMCLASS);
+                                ((VarSymbol) e).clearAnnotationMetadata();
+                            }
+                            return null;
+                        }
+                    }.scan(node.sym);
+                    if (chk.getCompiled(node.sym) == node.sym)
+                        chk.removeCompiled(node.sym);
                 }
                 node.sym = null;
             }
@@ -1686,7 +1758,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
 
 
     private boolean moreToDo() {
-        return filer.newFiles();
+        return filer.newFiles() && isBackgroundCompilation;
     }
 
     /**
@@ -1804,5 +1876,11 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                 return false;
         }
         return true;
+    }
+
+    private static void rethrowAbort(final Throwable t) throws Error {
+        if (t instanceof ThreadDeath || t instanceof Abort) {
+            throw (Error) t;
+        }
     }
 }

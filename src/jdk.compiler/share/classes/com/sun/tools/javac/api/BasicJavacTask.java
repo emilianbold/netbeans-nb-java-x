@@ -61,7 +61,7 @@ import com.sun.tools.javac.util.DefinedBy;
 import com.sun.tools.javac.util.DefinedBy.Api;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.Log;
-import com.sun.tools.javac.util.ModuleHelper;
+//import com.sun.tools.javac.util.ModuleHelper;
 import com.sun.tools.javac.util.Options;
 import com.sun.tools.javac.util.PropagatedException;
 
@@ -247,10 +247,10 @@ public class BasicJavacTask extends JavacTask {
     }
 
     private void initPlugin(Plugin p, String... args) {
-        Module m = p.getClass().getModule();
-        if (m.isNamed() && options.isSet("accessInternalAPI")) {
-            ModuleHelper.addExports(getClass().getModule(), m);
-        }
+//        Module m = p.getClass().getModule();
+//        if (m.isNamed() && options.isSet("accessInternalAPI")) {
+//            ModuleHelper.addExports(getClass().getModule(), m);
+//        }
         p.init(this, args);
     }
 

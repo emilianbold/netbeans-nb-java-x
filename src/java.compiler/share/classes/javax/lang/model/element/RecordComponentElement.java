@@ -37,7 +37,7 @@ package javax.lang.model.element;
  *
  * @since 14
  */
-@jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.RECORDS,
+@   jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.RECORDS,
                              essentialAPI=false)
 public interface RecordComponentElement extends Element {
     /**
