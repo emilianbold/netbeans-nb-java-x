@@ -4405,7 +4405,7 @@ public class JavacParser implements Parser {
      *      )
      *
      */
-    public List<JCTree> classOrInterfaceOrRecordBodyDeclaration(Name className, boolean isInterface, Boolean isRecord) {
+    public List<JCTree> classOrInterfaceOrRecordBodyDeclaration(Name className, boolean isInterface, boolean isRecord) {
         if (token.kind == SEMI) {
             nextToken();
             return List.nil();
@@ -4693,37 +4693,6 @@ public class JavacParser implements Parser {
     List<JCVariableDecl> formalParameters() {
         return formalParameters(false, false);
     }
-    //TODO: this is temporary fix and will we removed in future
-    List<JCVariableDecl> formalParameters(boolean lambdaParameters) {
-        boolean recordComponents = false;
-          ListBuffer<JCVariableDecl> params = new ListBuffer<>();
-        JCVariableDecl lastParam;
-        accept(LPAREN);
-        if (token.kind != RPAREN) {
-            this.allowThisIdent = !lambdaParameters && !recordComponents;
-            lastParam = formalParameter(lambdaParameters, recordComponents);
-            if (lastParam.nameexpr != null) {
-                this.receiverParam = lastParam;
-            } else {
-                params.append(lastParam);
-            }
-            this.allowThisIdent = false;
-            while (token.kind == COMMA) {
-                if ((lastParam.mods.flags & Flags.VARARGS) != 0) {
-                    log.error(DiagnosticFlag.SYNTAX, lastParam, Errors.VarargsMustBeLast);
-                }
-                nextToken();
-                params.append(lastParam = formalParameter(lambdaParameters, recordComponents));
-            }
-        }
-        if (token.kind == RPAREN) {
-            nextToken();
-        } else {
-            setErrorEndPos(token.pos);
-            reportSyntaxError(S.prevToken().endPos, Errors.Expected3(COMMA, RPAREN, LBRACKET));
-        }
-        return params.toList();
-    }
     
     List<JCVariableDecl> formalParameters(boolean lambdaParameters, boolean recordComponents) {
         ListBuffer<JCVariableDecl> params = new ListBuffer<>();
@@ -4851,38 +4820,6 @@ public class JavacParser implements Parser {
             return type;
         }
     }
-    //TODO: this is temporary fix and will we removed in future
-     protected JCVariableDecl formalParameter(boolean lambdaParameter) {
-         boolean recordComponent = false;
-                 JCModifiers mods = !recordComponent ? optFinal(Flags.PARAMETER) : modifiersOpt();
-        if (recordComponent && mods.flags != 0) {
-            log.error(mods.pos, Errors.RecordCantDeclareFieldModifiers);
-        }
-        if (recordComponent) {
-            mods.flags |= Flags.RECORD | Flags.FINAL | Flags.PRIVATE | Flags.GENERATED_MEMBER;
-        }
-        // need to distinguish between vararg annos and array annos
-        // look at typeAnnotationsPushedBack comment
-        this.permitTypeAnnotationsPushBack = true;
-        JCExpression type = parseType(lambdaParameter);
-        this.permitTypeAnnotationsPushBack = false;
-
-        if (token.kind == ELLIPSIS) {
-            List<JCAnnotation> varargsAnnos = typeAnnotationsPushedBack;
-            typeAnnotationsPushedBack = List.nil();
-            mods.flags |= Flags.VARARGS;
-            // insert var arg type annotations
-            type = insertAnnotationsToMostInner(type, varargsAnnos, true);
-            nextToken();
-        } else {
-            // if not a var arg, then typeAnnotationsPushedBack should be null
-            if (typeAnnotationsPushedBack.nonEmpty()) {
-                reportSyntaxError(typeAnnotationsPushedBack.head.pos, Errors.IllegalStartOfType);
-            }
-            typeAnnotationsPushedBack = List.nil();
-        }
-        return variableDeclaratorId(mods, type, lambdaParameter);
-     }
 
     /** FormalParameter = { FINAL | '@' Annotation } Type VariableDeclaratorId
      *  LastFormalParameter = { FINAL | '@' Annotation } Type '...' Ident | FormalParameter
