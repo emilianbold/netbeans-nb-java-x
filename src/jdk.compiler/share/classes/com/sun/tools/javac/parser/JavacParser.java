@@ -3341,7 +3341,7 @@ public class JavacParser implements Parser {
         if (elemType.hasTag(IDENT)) {
             Name typeName = ((JCIdent)elemType).name;
             if (isRestrictedTypeName(typeName, pos, !compound && localDecl)) {
-                if (type.hasTag(TYPEARRAY) && !compound) {
+                if (newType.hasTag(TYPEARRAY) && !compound) {
                     //error - 'var' and arrays
                     reportSyntaxError(pos, Errors.RestrictedTypeNotAllowedArray(typeName));
                 } else {
