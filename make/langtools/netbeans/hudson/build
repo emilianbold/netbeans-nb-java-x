@@ -28,11 +28,11 @@ diff_jars() {
     rm -rf jardiff
 }
 
-load_into_cache junit-4.10.jar http://hg.netbeans.org/binaries/E4F1766CE7404A08F45D859FB9C226FC9E41A861-junit-4.10.jar
-API_JAR_NAME=`wget -q -O - http://hg.netbeans.org/main/raw-file/tip/libs.javacapi/external/binaries-list | tr ' ' '-'`
-load_into_cache javac-api-nb-7.0-b07.jar http://hg.netbeans.org/binaries/$API_JAR_NAME
-IMPL_JAR_NAME=`wget -q -O - http://hg.netbeans.org/main/raw-file/tip/libs.javacimpl/external/binaries-list | tr ' ' '-'`
-load_into_cache javac-impl-nb-7.0-b07.jar http://hg.netbeans.org/binaries/$IMPL_JAR_NAME
+load_into_cache junit-4.10.jar https://hg.netbeans.org/binaries/E4F1766CE7404A08F45D859FB9C226FC9E41A861-junit-4.10.jar
+API_JAR_NAME=`wget -q -O - https://hg.netbeans.org/main/raw-file/tip/libs.javacapi/external/binaries-list | tr ' ' '-'`
+load_into_cache javac-api-nb-7.0-b07.jar https://hg.netbeans.org/binaries/$API_JAR_NAME
+IMPL_JAR_NAME=`wget -q -O - https://hg.netbeans.org/main/raw-file/tip/libs.javacimpl/external/binaries-list | tr ' ' '-'`
+load_into_cache javac-impl-nb-7.0-b07.jar https://hg.netbeans.org/binaries/$IMPL_JAR_NAME
 
 JUNIT_CP=$PWD/cache/junit-4.10.jar
 
