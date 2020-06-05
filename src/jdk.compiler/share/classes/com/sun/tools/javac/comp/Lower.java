@@ -3477,7 +3477,7 @@ public class Lower extends TreeTranslator {
             Type iteratorTarget = syms.objectType;
             Type iterableType = types.asSuper(types.cvarUpperBound(tree.expr.type),
                                               syms.iterableType.tsym);
-            if (iterableType.getTypeArguments().nonEmpty())
+            if (iterableType != null && iterableType.getTypeArguments().nonEmpty())
                 iteratorTarget = types.erasure(iterableType.getTypeArguments().head);
             Type eType = types.skipTypeVars(tree.expr.type, false);
             tree.expr.type = types.erasure(eType);
