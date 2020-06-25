@@ -3290,16 +3290,7 @@ public class CompilerProperties {
          *    both {1} {2} in {3} and {4} {5} in {6} match
          */
         public static Error RefAmbiguous(Name arg0, Kind arg1, Symbol arg2, Symbol arg3, Kind arg4, Symbol arg5, Symbol arg6) {
-           
-            StringBuilder sb = new StringBuilder();
-              sb.append("===============Printing the stack trace================\n");
-            for (StackTraceElement e : Thread.currentThread().getStackTrace())
-            {
-               sb.append(e);
-                sb.append("\n");
-            }
-            return new Error("compiler",sb.toString());
-            //return new Error("compiler", "ref.ambiguous", arg0, arg1, arg2, arg3, arg4, arg5, arg6);
+            return new Error("compiler", "ref.ambiguous", arg0, arg1, arg2, arg3, arg4, arg5, arg6);
         }
         
         /**
@@ -7735,15 +7726,7 @@ public class CompilerProperties {
          *    both {1} {2} in {3} and {4} {5} in {6} match
          */
         public static Fragment RefAmbiguous(Name arg0, Kind arg1, Symbol arg2, Symbol arg3, Kind arg4, Symbol arg5, Symbol arg6) {
-               StringBuilder sb = new StringBuilder();
-              sb.append("===============Printing the stack trace= fragment===============\n");
-            for (StackTraceElement e : Thread.currentThread().getStackTrace())
-            {
-               sb.append(e);
-                sb.append("\n");
-            }
-            return new Fragment("compiler",sb.toString());
-            //return new Fragment("compiler", "ref.ambiguous", arg0, arg1, arg2, arg3, arg4, arg5, arg6);
+            return new Fragment("compiler", "ref.ambiguous", arg0, arg1, arg2, arg3, arg4, arg5, arg6);
         }
         
         /**
