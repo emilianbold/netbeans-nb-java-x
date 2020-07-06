@@ -25,6 +25,8 @@
 
 package propertiesparser.gen;
 
+import java.io.BufferedReader;
+
 import static java.util.stream.Collectors.toList;
 
 import propertiesparser.parser.Message;
@@ -39,9 +41,12 @@ import propertiesparser.parser.MessageType.UnionType;
 import propertiesparser.parser.MessageType.Visitor;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,6 +59,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
 
 public class ClassGenerator {
 
@@ -175,13 +181,16 @@ public class ClassGenerator {
             entry.getValue().stream().forEach(e ->
                     importedTypes.addAll(importedTypes(e.getValue().getMessageInfo().getTypes())));
         }
-        String clazz = StubKind.TOPLEVEL.format(
+        StringBuilder clazzSb = new StringBuilder();
+                clazzSb.append(licenseHeader(new File("./tools/propertiesparser/gen/GPL-2-CPE-license")));
+                clazzSb.append("\n");
+                clazzSb.append(StubKind.TOPLEVEL.format(
                 packageName(messageFile.file),
                 String.join("\n", generateImports(importedTypes)),
                 toplevelName(messageFile.file),
-                String.join("\n", nestedDecls));
+                String.join("\n", nestedDecls)));
         try (FileWriter fw = new FileWriter(new File(outDir, toplevelName(messageFile.file) + ".java"))) {
-            fw.append(clazz);
+            fw.append(clazzSb);
         } catch (Throwable ex) {
             throw new AssertionError(ex);
         }
@@ -194,6 +203,25 @@ public class ClassGenerator {
         return Stream.of(s.split("\n"))
                 .map(sub -> INDENT_STRING.substring(0, level * INDENT_WIDTH) + sub)
                 .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * license header.
+     */
+    String licenseHeader(File file) {
+        StringBuilder sb = new StringBuilder();
+        BufferedReader r;
+        try {
+            r = new BufferedReader(new FileReader(file));
+            String line = null;
+            while ((line = r.readLine()) != null) {
+                sb.append(line);
+                sb.append("\n");
+            }
+        } catch (IOException ex) {
+             throw new AssertionError(ex);
+        }
+        return sb.toString();
     }
 
     /**
