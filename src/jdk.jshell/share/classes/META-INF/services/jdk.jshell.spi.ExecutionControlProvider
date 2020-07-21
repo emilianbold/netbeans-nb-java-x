@@ -1,3 +1,0 @@
-jdk.jshell.execution.JdiExecutionControlProvider
-jdk.jshell.execution.LocalExecutionControlProvider
-jdk.jshell.execution.FailOverExecutionControlProvider

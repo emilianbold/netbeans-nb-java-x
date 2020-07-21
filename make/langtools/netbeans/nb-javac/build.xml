@@ -105,4 +105,26 @@
 
     <target name="-pre-compile-test" depends="jar"/>
 
+    <target name="zip-nb-javac-sources" depends="clean">
+    <property name="nb-javac-ver" value="14" />
+	<zip basedir="../../../../" destfile="../../../..//nb-javac-${nb-javac-ver}-sources.zip">
+	    <exclude name="**/build/"/>
+            <exclude name="**/dist/"/>
+            <exclude name="**/nbproject/private/"/>
+	    <exclude name="**/nb-javac-sources.zip"/>
+	    <include name="src/jdk.compiler/**"/>
+	    <include name="src/java.compiler/**"/>
+	    <include name="src/jdk.jdeps/**"/>
+	    <include name="make/langtools/netbeans/nb-javac/**"/>
+	    <include name="README.md"/>
+	    <include name="LICENSE"/>
+		<include name=".hgignore"/>
+		<include name=".hgtags"/>
+		<include name="CONTRIBUTING.md"/>
+		<include name="make/langtools/tools/**"/>
+		<include name="make/langtools/build.xml"/>
+		<include name="make/langtools/build.properties"/>
+	
+	</zip>
+    </target>
 </project>
