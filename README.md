@@ -12,11 +12,11 @@ hg clone https://hg.netbeans.org/main/nb-java-x
 
 hg update -r <REVISION NUMBER>
 
-Please run the below command to build nb-javac. Build of nb-javac will generate two jars 
+Run the below command to build nb-javac. Build of nb-javac will generate two jars 
 namely javac-api.jar and javac-impl.jar at location ./make/langtools/netbeans/nb-javac/dist/
 
 3. ant -f ./make/langtools/netbeans/nb-javac clean jar
 
-Please run below command to zip the source code of nb-javac
+Run below command to zip the source code of nb-javac
 
 4. ant -f ./make/langtools/netbeans/nb-javac zip-nb-javac-sources
