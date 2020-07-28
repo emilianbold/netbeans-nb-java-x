@@ -81,8 +81,8 @@
                 <include name="com/sun/source/**/*"/>
                 <include name="javax/lang/**/*"/>
                 <include name="javax/tools/*"/>
+                <include name="jdk/internal/PreviewFeature*"/>
                 <include name="javax/annotation/**/*"/>
-				<include name="../../../../../../README.md"/>
 				
             </fileset>
 			<fileset dir="${nb.javac.dir}">
