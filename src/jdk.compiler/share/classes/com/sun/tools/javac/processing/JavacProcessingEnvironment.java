@@ -984,7 +984,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
      */
     @SuppressWarnings("preview")
     public static class ComputeAnnotationSet extends
-        ElementScanner9<Set<TypeElement>, Set<TypeElement>> {
+        ElementScanner14<Set<TypeElement>, Set<TypeElement>> {
         final Elements elements;
 
         public ComputeAnnotationSet(Elements elements) {
@@ -1681,7 +1681,7 @@ public class JavacProcessingEnvironment implements ProcessingEnvironment, Closea
                     node.defs = defs;
                 }
                 if (node.sym != null) {
-                    new ElementScanner6<Void, Void>() {
+                    new ElementScanner14<Void, Void>() {
                         @Override
                         public Void visitType(TypeElement e, Void p) {
                             if (e instanceof ClassSymbol) {

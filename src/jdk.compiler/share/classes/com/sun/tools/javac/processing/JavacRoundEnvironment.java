@@ -157,7 +157,7 @@ public class JavacRoundEnvironment implements RoundEnvironment {
     // Could be written as a local class inside getElementsAnnotatedWith
     @SuppressWarnings("preview")
     private class AnnotationSetScanner extends
-        ElementScanner9<Set<Element>, TypeElement> {
+        ElementScanner14<Set<Element>, TypeElement> {
         // Insertion-order preserving set
         private Set<Element> annotatedElements = new LinkedHashSet<>();
 

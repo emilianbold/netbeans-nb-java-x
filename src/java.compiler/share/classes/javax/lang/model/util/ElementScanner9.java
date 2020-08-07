@@ -95,8 +95,7 @@ import static javax.lang.model.SourceVersion.*;
  * @since 9
  * @spec JPMS
  */
-@   jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.RECORDS,
-                             essentialAPI=false)
+
 @SupportedSourceVersion(RELEASE_14)
 public class ElementScanner9<R, P> extends ElementScanner8<R, P> {
     /**

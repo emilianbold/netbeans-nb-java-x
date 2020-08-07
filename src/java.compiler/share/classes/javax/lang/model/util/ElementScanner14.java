@@ -100,7 +100,7 @@ import static javax.lang.model.SourceVersion.*;
  * @see ElementScanner9
  * @since 14
  */
-@   jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.RECORDS,
+@jdk.internal.PreviewFeature(feature=jdk.internal.PreviewFeature.Feature.RECORDS,
                              essentialAPI=false)
 @SupportedSourceVersion(RELEASE_14)
 public class ElementScanner14<R, P> extends ElementScanner9<R, P> {

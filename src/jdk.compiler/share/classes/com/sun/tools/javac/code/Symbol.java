@@ -46,7 +46,7 @@ import javax.lang.model.element.RecordComponentElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.TypeParameterElement;
 import javax.lang.model.element.VariableElement;
-import javax.lang.model.util.ElementScanner6;
+import javax.lang.model.util.ElementScanner14;
 import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
 

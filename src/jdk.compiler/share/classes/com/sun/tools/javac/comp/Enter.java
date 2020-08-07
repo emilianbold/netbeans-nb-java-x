@@ -33,7 +33,7 @@ import java.util.Optional;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
-import javax.lang.model.util.ElementScanner6;
+import javax.lang.model.util.ElementScanner14;
 import javax.tools.JavaFileObject;
 import javax.tools.JavaFileManager;
 
@@ -586,7 +586,7 @@ public class Enter extends JCTree.Visitor {
             c.kind = TYP;
             c.type = new ClassType(Type.noType, List.<Type>nil(), c);
         } else if (reattr && c.completer.isTerminal()) {
-            new ElementScanner6<Void, Void>() {
+            new ElementScanner14<Void, Void>() {
                 @Override
                 public Void visitType(TypeElement te, Void p) {
                     if (te instanceof ClassSymbol && ((ClassSymbol) te).completer.isTerminal()) {
